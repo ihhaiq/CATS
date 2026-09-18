@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from bot.services.rich_card import build_rich_card
+from bot.services.shop_card import build_shop_card
 
 
 def _cat(stamp: str) -> dict:
@@ -37,6 +38,25 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الراحة والنوم", card.html)
         self.assertIn("cat:777:feed", card.html)
         self.assertIn("cat:777:play", card.html)
+
+    def test_rich_card_escapes_user_supplied_name(self) -> None:
+        stamp = datetime.utcnow().isoformat()
+        cat = _cat(stamp)
+        cat["name"] = "<b>&Lulu</b>"
+        card = build_rich_card(cat, 42)
+        self.assertIn("&lt;b&gt;&amp;Lulu&lt;/b&gt;", card.html)
+        self.assertNotIn("<h2><b>", card.html)
+
+    def test_shop_card_binds_buttons_to_owner(self) -> None:
+        card = build_shop_card(
+            [{"item_id": 1, "name": "<وجبة>", "price": 25}],
+            ["<قديم>"],
+            100,
+            owner_id=777,
+        )
+        self.assertIn("shop:buy:777:1", card.html)
+        self.assertIn("&lt;وجبة&gt;", card.html)
+        self.assertIn("&lt;قديم&gt;", card.html)
 
     def test_local_store_creates_and_updates_json(self) -> None:
         from bot.config import settings
