@@ -1,4 +1,6 @@
 """Rich Telegram card shared by private chat and Guest Mode."""
+from html import escape
+
 from aiogram.types import (
     InputMediaPhoto,
     InputMediaVideo,
@@ -41,16 +43,19 @@ def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> Input
 
     sleeping = is_sleeping(cat)
     sleep_note = "<p>😴 القطة نائمة. كل الأفعال متوقفة حتى تستيقظ.</p>" if sleeping else ""
-    notice = cat.get("action_notice", "")
+    notice = escape(str(cat.get("action_notice", "")))
     notice_html = f"<p><b>{notice}</b></p>" if notice else ""
     wake_action = "wake" if sleeping else "sleep"
     wake_label = "إيقاظ" if sleeping else "نوم"
     callback_prefix = f"cat:{cat['owner_id']}"
     fullness = 100 - cat["hunger"]
     sleep_need = sleep_need_percent(cat)
+    name = escape(str(cat["name"]))
+    breed = escape(str(cat["breed"]))
+    id_number = escape(str(cat["id_number"]))
     html = f"""
-<h2>{cat['name']}</h2>
-<p>السلالة: {cat['breed']} | #{cat['id_number']}</p>
+<h2>{name}</h2>
+<p>السلالة: {breed} | #{id_number}</p>
 <hr/>
 {media_markup}
 <hr/>
