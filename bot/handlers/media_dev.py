@@ -10,7 +10,8 @@ from bot.services.cat_assets import (
     CAT_STATES,
     inspect_cat_asset_library,
 )
-from bot.services.local_store import set_media_file
+from bot.services.local_store import set_media_override
+from bot.services.rich_card import build_rich_card
 
 router = Router(name="media_dev")
 pending: dict[int, tuple[str, str, str]] = {}
@@ -40,6 +41,7 @@ def media_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🖼️ تحرير الوسائط", callback_data="media:edit")],
             [InlineKeyboardButton(text="🔎 فحص مكتبة القطط", callback_data="media:audit")],
+            [InlineKeyboardButton(text="🧪 اختبار الصور الغنية", callback_data="media:test")],
         ]
     )
 
@@ -156,6 +158,57 @@ async def audit_assets(query: CallbackQuery) -> None:
     await query.message.edit_text("\n".join(lines), reply_markup=media_menu())
 
 
+async def _send_media_test(message: Message) -> None:
+    sample = {
+        "name": "Siamese Test",
+        "breed": "siamese",
+        "age_days": 30,
+        "id_number": "000001",
+        "hunger": 20,
+        "happiness": 90,
+        "love_bar": 100,
+        "slept_today_hours": 10,
+        "sleep_until": None,
+        "last_wake_at": None,
+    }
+    cases = (
+        ("idle", "status"),
+        ("hungry", "hungry"),
+        ("sleep", "sleep"),
+        ("angry", "cat_angry_sleep"),
+    )
+    for label, requested in cases:
+        await message.answer(f"🧪 {label}")
+        card = await build_rich_card(
+            message.bot,
+            dict(sample),
+            0,
+            requested,
+            upload_chat_id=message.chat.id,
+        )
+        await message.bot.send_rich_message(
+            chat_id=message.chat.id,
+            rich_message=card,
+        )
+
+
+@router.message(Command("dev_media_test"))
+async def dev_media_test(message: Message) -> None:
+    if not allowed(message.from_user.id):
+        await message.answer("هذا الأمر للأدمن فقط.")
+        return
+    await _send_media_test(message)
+
+
+@router.callback_query(F.data == "media:test")
+async def dev_media_test_button(query: CallbackQuery) -> None:
+    if not allowed(query.from_user.id):
+        await query.answer("للأدمن فقط", show_alert=True)
+        return
+    await query.answer("جاري اختبار الصور…")
+    await _send_media_test(query.message)
+
+
 async def save(message: Message, file_id: str, media_type: str) -> None:
     if not allowed(message.from_user.id):
         return
@@ -163,7 +216,7 @@ async def save(message: Message, file_id: str, media_type: str) -> None:
     if not selection:
         return
     breed, age_stage, state = selection
-    await set_media_file(
+    await set_media_override(
         state,
         file_id,
         media_type,
@@ -172,7 +225,7 @@ async def save(message: Message, file_id: str, media_type: str) -> None:
     )
     pending.pop(message.from_user.id, None)
     await message.answer(
-        "تم حفظ الملف تلقائياً.\n"
+        "تم حفظ override يدوي.\n"
         f"{breed} → {age_stage} → {state}"
     )
 
