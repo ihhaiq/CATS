@@ -1,6 +1,9 @@
 """
-Procedural cat renderer used as a fallback while the official asset library is
-incomplete.
+Legacy procedural renderer for the older non-Rich runtime.
+
+The active Rich Message runtime resolves official filesystem assets through
+bot.services.media_runtime. Do not add new official asset lookup or Telegram
+file_id caching logic to this module.
 
 Official Catibot assets live under:
     bot/assets/cats/<breed>/<age_stage>/<state>.png
