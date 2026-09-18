@@ -192,22 +192,28 @@ async def resolve_cat_media(
                     path=local.relative_path,
                 )
 
-    legacy_file_id = get_media_file_id_sync(
-        visual_state,
-        breed,
-        age_stage,
-    )
-    if legacy_file_id:
-        return ResolvedCatMedia(
-            file_id=legacy_file_id,
-            media_type=get_media_type_sync(
-                visual_state,
-                breed,
-                age_stage,
-            ),
-            visual_state=visual_state,
-            source="legacy_json",
+    legacy_lookup_states = [visual_state]
+    original_request = str(requested_state or "").strip().lower()
+    if original_request and original_request not in legacy_lookup_states:
+        legacy_lookup_states.append(original_request)
+
+    for legacy_state in legacy_lookup_states:
+        legacy_file_id = get_media_file_id_sync(
+            legacy_state,
+            breed,
+            age_stage,
         )
+        if legacy_file_id:
+            return ResolvedCatMedia(
+                file_id=legacy_file_id,
+                media_type=get_media_type_sync(
+                    legacy_state,
+                    breed,
+                    age_stage,
+                ),
+                visual_state=visual_state,
+                source="legacy_json",
+            )
 
     env_file_id = _settings_fallback_id(visual_state)
     if env_file_id:
