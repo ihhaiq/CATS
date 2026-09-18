@@ -3,15 +3,26 @@ import random
 from datetime import datetime
 
 from aiogram import Router
-from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
+from aiogram.types import (
+    InlineQueryResultArticle,
+    InputRichMessageContent,
+    InputTextMessageContent,
+    Message,
+)
 
 from bot.services.action_locks import user_action_lock
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import ensure_user, get_user_cat, refresh_cat_state, update_cat
-from bot.services.local_store import create_cat, now_iso
-from bot.services.local_store import get_user_points
+from bot.services.local_store import (
+    create_cat,
+    ensure_user,
+    get_user_cat,
+    get_user_points,
+    now_iso,
+    refresh_cat_state,
+    update_cat,
+)
 from bot.services.rich_card import build_rich_card
-from bot.services.shop import list_items, open_shop
+from bot.services.shop import open_shop
 from bot.services.shop_card import build_shop_card
 
 router = Router(name="guest")
@@ -59,6 +70,125 @@ def _requested_command(message: Message) -> tuple[str | None, str]:
     return _ALIASES.get(command), " ".join(words[1:]).strip()
 
 
+def _text_result(action: str, title: str, text: str) -> InlineQueryResultArticle:
+    return InlineQueryResultArticle(
+        id=f"guest-{action}",
+        title=title,
+        description=text.replace("\n", " ")[:100],
+        input_message_content=InputTextMessageContent(message_text=text),
+    )
+
+
+async def _adopt_result(user_id: int, argument: str) -> InlineQueryResultArticle:
+    async with user_action_lock(user_id):
+        await ensure_user(user_id)
+        if await get_user_cat(user_id):
+            return _text_result(
+                "adopt",
+                "لديك قطة بالفعل",
+                "🐾 عندك قطة بالفعل. استخدم @RichsCatBot حالة لمشاهدة حالتها.",
+            )
+        if not argument:
+            return _text_result(
+                "adopt",
+                "اسم القطة مطلوب",
+                "اكتب اسم القطة بعد الأمر، مثلاً: @RichsCatBot تبني لوز",
+            )
+        if len(argument) > 40:
+            return _text_result(
+                "adopt",
+                "الاسم طويل",
+                "اسم القطة يجب أن يكون أقل من 40 حرفاً.",
+            )
+
+        stamp = now_iso()
+        cat = {
+            "owner_id": user_id,
+            "partner_id": None,
+            "name": argument,
+            "title": "الأليف",
+            "id_number": str(random.randint(100000, 999999)),
+            "breed": assign_random_breed(),
+            "age_days": 30,
+            "hunger": 20,
+            "happiness": 100,
+            "love_bar": 100,
+            "partner_affinity": 0,
+            "is_fled": False,
+            "last_fed": stamp,
+            "last_played": stamp,
+            "last_walk": stamp,
+            "last_talked": stamp,
+            "last_decay_at": stamp,
+            "sleep_day": datetime.utcnow().date().isoformat(),
+            "slept_today_hours": 10.0,
+            "sleep_until": None,
+            "last_wake_at": stamp,
+        }
+        await create_cat(cat)
+
+    return _text_result(
+        "adopt",
+        "تم التبني",
+        (
+            f"🐾 تم تبني {cat['name']} من Guest Mode!\n"
+            f"السلالة: {cat['breed']} | الرقم: #{cat['id_number']}\n"
+            "استخدم @RichsCatBot حالة لمشاهدة الحالة."
+        ),
+    )
+
+
+async def _cat_result(user_id: int, action: str) -> InlineQueryResultArticle:
+    async with user_action_lock(user_id):
+        await ensure_user(user_id)
+        cat = await get_user_cat(user_id)
+        if cat is None:
+            return _text_result(
+                action,
+                "لا توجد قطة",
+                "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً.",
+            )
+
+        refresh_cat_state(cat)
+        await update_cat(cat)
+        points = await get_user_points(user_id)
+
+        if action == "status":
+            return InlineQueryResultArticle(
+                id="guest-status",
+                title="حالة القطة",
+                description=f"{cat['name']} | الجوع {cat['hunger']}% | السعادة {cat['happiness']}%",
+                input_message_content=InputRichMessageContent(
+                    rich_message=build_rich_card(cat, points),
+                ),
+            )
+
+        preview = dict(cat)
+        if action == "feed":
+            preview["hunger"] = max(0, preview["hunger"] - 30)
+            title = "معاينة الإطعام"
+            media_kind = "feed"
+        elif action == "play":
+            preview["happiness"] = min(100, preview["happiness"] + 25)
+            title = "معاينة اللعب"
+            media_kind = "play"
+        elif action == "walk":
+            preview["happiness"] = min(100, preview["happiness"] + 15)
+            title = "معاينة النزهة"
+            media_kind = "walk"
+        else:
+            return _text_result(action, "حالة القطة", _state_text(cat))
+
+        return InlineQueryResultArticle(
+            id=f"guest-{action}",
+            title=title,
+            description=f"{cat['name']} بعد {title.replace('معاينة ', '')}",
+            input_message_content=InputRichMessageContent(
+                rich_message=build_rich_card(preview, points, media_kind),
+            ),
+        )
+
+
 @router.guest_message()
 async def guest_message(message: Message) -> None:
     if not message.guest_query_id or not message.from_user:
@@ -67,128 +197,25 @@ async def guest_message(message: Message) -> None:
     action, argument = _requested_command(message)
     if action is None:
         return
+
+    user_id = message.from_user.id
     if action == "shop":
-        user_id = message.from_user.id
         items = await open_shop(user_id)
         result = InlineQueryResultArticle(
             id="guest-shop",
             title="المتجر",
             description="افتح المتجر واشترِ بالأزرار",
             input_message_content=InputRichMessageContent(
-                rich_message=build_shop_card(items, [], await get_user_points(user_id)),
+                rich_message=build_shop_card(
+                    items,
+                    [],
+                    await get_user_points(user_id),
+                ),
             ),
         )
-        await message.bot.answer_guest_query(message.guest_query_id, result)
-        return
-    if action == "adopt":
-        user_id = message.from_user.id
-        await ensure_user(user_id)
-        if await get_user_cat(user_id):
-            text = "🐾 عندك قطة بالفعل. استخدم @RichsCatBot حالة لمشاهدة حالتها."
-            title = "لديك قطة بالفعل"
-        elif not argument:
-            text = "اكتب اسم القطة بعد الأمر، مثلاً: @RichsCatBot تبني لوز"
-            title = "اسم القطة مطلوب"
-        elif len(argument) > 40:
-            text = "اسم القطة يجب أن يكون أقل من 40 حرفاً."
-            title = "الاسم طويل"
-        else:
-            stamp = now_iso()
-            cat = {
-                "owner_id": user_id,
-                "partner_id": None,
-                "name": argument,
-                "title": "الأليف",
-                "id_number": str(random.randint(100000, 999999)),
-                "breed": assign_random_breed(),
-                "age_days": 30,
-                "hunger": 20,
-                "happiness": 100,
-                "love_bar": 100,
-                "partner_affinity": 0,
-                "is_fled": False,
-                "last_fed": stamp,
-                "last_played": stamp,
-                "last_walk": stamp,
-                "last_talked": stamp,
-                "last_decay_at": stamp,
-                "sleep_day": datetime.utcnow().date().isoformat(),
-                "slept_today_hours": 10.0,
-                "sleep_until": None,
-                "last_wake_at": stamp,
-            }
-            await create_cat(cat)
-            text = (
-                f"🐾 تم تبني {cat['name']} من Guest Mode!\n"
-                f"السلالة: {cat['breed']} | الرقم: #{cat['id_number']}\n"
-                "استخدم @RichsCatBot حالة لمشاهدة الحالة."
-            )
-            title = "تم التبني"
-    elif action != "adopt":
-        user_id = message.from_user.id
-        await ensure_user(user_id)
-        cat = await get_user_cat(user_id)
-        if cat is None:
-            text = "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً."
-            title = "لا توجد قطة"
-        else:
-            refresh_cat_state(cat)
-            await update_cat(cat)
-            if action == "status":
-                result = InlineQueryResultArticle(
-                    id="guest-status",
-                    title="حالة القطة",
-                    description=f"{cat['name']} | الجوع {cat['hunger']}% | السعادة {cat['happiness']}%",
-                    input_message_content=InputRichMessageContent(
-                        rich_message=build_rich_card(cat, await get_user_points(user_id)),
-                    ),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            if action == "feed":
-                preview = dict(cat)
-                preview["hunger"] = max(0, preview["hunger"] - 30)
-                card = build_rich_card(preview, await get_user_points(user_id), "feed")
-                result = InlineQueryResultArticle(
-                    id="guest-feed",
-                    title="معاينة الإطعام",
-                    description=f"{cat['name']} بعد الإطعام",
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            elif action == "play":
-                preview = dict(cat)
-                preview["happiness"] = min(100, preview["happiness"] + 25)
-                card = build_rich_card(preview, await get_user_points(user_id), "play")
-                result = InlineQueryResultArticle(
-                    id="guest-play",
-                    title="معاينة اللعب",
-                    description=f"{cat['name']} بعد اللعب",
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            elif action == "walk":
-                preview = dict(cat)
-                preview["happiness"] = min(100, preview["happiness"] + 15)
-                card = build_rich_card(preview, await get_user_points(user_id), "walk")
-                result = InlineQueryResultArticle(
-                    id="guest-walk",
-                    title="معاينة النزهة",
-                    description=f"{cat['name']} بعد النزهة",
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            else:
-                text = _state_text(cat)
-                title = "حالة القطة"
+    elif action == "adopt":
+        result = await _adopt_result(user_id, argument)
+    else:
+        result = await _cat_result(user_id, action)
 
-    result = InlineQueryResultArticle(
-        id=f"guest-{action or 'help'}",
-        title=title,
-        description=text.replace("\n", " ")[:100],
-        input_message_content=InputTextMessageContent(message_text=text),
-    )
     await message.bot.answer_guest_query(message.guest_query_id, result)
