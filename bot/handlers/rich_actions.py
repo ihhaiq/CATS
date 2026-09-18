@@ -113,8 +113,9 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     # Any new action invalidates an older temporary notice/task.
     clear_action_notice(cat)
+    woke = finish_sleep(cat)
     apply_decay(cat)
-    if finish_sleep(cat):
+    if woke:
         await update_cat(cat)
 
     if is_sleeping(cat) and action != "wake":
