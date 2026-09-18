@@ -2,6 +2,7 @@
 from aiogram import Router
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
+from bot.services.action_locks import user_action_lock
 from bot.services.local_store import ensure_user, get_user_cat, refresh_cat_state, update_cat
 
 router = Router(name="inline")
@@ -42,32 +43,33 @@ async def inline_cat(inline_query: InlineQuery) -> None:
         return
 
     user_id = inline_query.from_user.id
-    await ensure_user(user_id)
-    cat = await get_user_cat(user_id)
-    if cat is None:
-        text = "🐾 ما عندك قطة بعد. أرسل /adopt اسم_القطة إلى البوت أولاً."
-        title = "لا توجد قطة"
-    else:
-        refresh_cat_state(cat)
-        await update_cat(cat)
-        if action == "feed":
-            preview = dict(cat)
-            preview["hunger"] = max(0, preview["hunger"] - 30)
-            title = "معاينة الإطعام"
-            text = "🍖 معاينة بعد الإطعام\n" + _state_text(preview)
-        elif action == "play":
-            preview = dict(cat)
-            preview["happiness"] = min(100, preview["happiness"] + 25)
-            title = "معاينة اللعب"
-            text = "🎾 معاينة بعد اللعب\n" + _state_text(preview)
-        elif action == "walk":
-            preview = dict(cat)
-            preview["happiness"] = min(100, preview["happiness"] + 15)
-            title = "معاينة النزهة"
-            text = "🚶 معاينة بعد النزهة\n" + _state_text(preview)
+    async with user_action_lock(user_id):
+        await ensure_user(user_id)
+        cat = await get_user_cat(user_id)
+        if cat is None:
+            text = "🐾 ما عندك قطة بعد. أرسل /adopt اسم_القطة إلى البوت أولاً."
+            title = "لا توجد قطة"
         else:
-            title = "حالة قطتك"
-            text = _state_text(cat)
+            refresh_cat_state(cat)
+            await update_cat(cat)
+            if action == "feed":
+                preview = dict(cat)
+                preview["hunger"] = max(0, preview["hunger"] - 30)
+                title = "معاينة الإطعام"
+                text = "🍖 معاينة بعد الإطعام\n" + _state_text(preview)
+            elif action == "play":
+                preview = dict(cat)
+                preview["happiness"] = min(100, preview["happiness"] + 25)
+                title = "معاينة اللعب"
+                text = "🎾 معاينة بعد اللعب\n" + _state_text(preview)
+            elif action == "walk":
+                preview = dict(cat)
+                preview["happiness"] = min(100, preview["happiness"] + 15)
+                title = "معاينة النزهة"
+                text = "🚶 معاينة بعد النزهة\n" + _state_text(preview)
+            else:
+                title = "حالة قطتك"
+                text = _state_text(cat)
 
     result = InlineQueryResultArticle(
         id=f"catibot-{action}",
