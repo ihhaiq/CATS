@@ -1,37 +1,58 @@
-"""
-/adopt <name> <title> — free cat adoption.
-TODO (AGENT.md step 4):
-  - Parse args, validate name/title length & profanity filter.
-  - Reject if user already has a live (non-FLED) cat.
-  - Randomly assign a breed (or offer a small free-pick pool) via services/economy.py helper.
-  - Generate unique id_number (4-6 digits, retry on collision).
-  - Insert cat row, render first status image, reply with it.
-"""
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.types import Message
+"""Adoption and onboarding handlers."""
 from datetime import datetime
 import random
 
-from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
+from aiogram import F, Router
+from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, InputRichMessage, Message
+
 from bot.services.economy import assign_random_breed
+from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
 
 router = Router(name="adopt")
 
 
-@router.message(Command("adopt", "تبني", "تبنّي"))
-async def cmd_adopt(message: Message) -> None:
-  user_id = message.from_user.id
-  await ensure_user(user_id)
-  if await get_user_cat(user_id):
-    await message.answer("عندك قطة بالفعل. استخدم /status لمشاهدة حالتها.")
-    return
+class AdoptFlow(StatesGroup):
+  waiting_name = State()
 
-  parts = (message.text or "").split(maxsplit=1)
-  name = parts[1].strip() if len(parts) > 1 else "لوز"
-  if len(name) > 40:
-    await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
-    return
+
+def _welcome_card() -> InputRichMessage:
+  return InputRichMessage(
+    html="""
+<h2>🐾 أهلاً بك في Catibot!</h2>
+<p>ابدأ بتبنّي قطتك الأولى.</p>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="success" data="adopt:start">تبنّي قطة</tg-button>
+</tg-button-row>
+""".strip(),
+    is_rtl=True,
+  )
+
+
+def _adopted_card(cat: dict) -> InputRichMessage:
+  return InputRichMessage(
+    html=f"""
+<h2>🐾 تم تبني {cat['name']}!</h2>
+<p>السلالة: {cat['breed']}</p>
+<p>رقمها: #{cat['id_number']}</p>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="primary" data="cat:status">عرض القطة</tg-button>
+</tg-button-row>
+""".strip(),
+    is_rtl=True,
+  )
+
+
+async def _send_adopted(message: Message, cat: dict) -> None:
+  await message.bot.send_rich_message(
+    chat_id=message.chat.id,
+    rich_message=_adopted_card(cat),
+  )
+
+
+async def _create_cat_for_user(user_id: int, name: str) -> dict:
   stamp = now_iso()
   cat = {
     "owner_id": user_id,
@@ -56,4 +77,77 @@ async def cmd_adopt(message: Message) -> None:
     "last_wake_at": stamp,
   }
   await create_cat(cat)
-  await message.answer(f"🐾 تم تبني {name}!\nالسلالة: {cat['breed']}\nرقمها: #{cat['id_number']}\nاستخدم /status لمشاهدتها.")
+  return cat
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message) -> None:
+  await ensure_user(message.from_user.id)
+  cat = await get_user_cat(message.from_user.id)
+  if cat is not None:
+    await message.bot.send_rich_message(
+      chat_id=message.chat.id,
+      rich_message=_adopted_card(cat),
+    )
+    return
+  await message.bot.send_rich_message(
+    chat_id=message.chat.id,
+    rich_message=_welcome_card(),
+  )
+
+
+@router.callback_query(F.data == "adopt:start")
+async def cb_adopt_start(query: CallbackQuery, state: FSMContext) -> None:
+  user_id = query.from_user.id
+  await ensure_user(user_id)
+  cat = await get_user_cat(user_id)
+  if cat is not None:
+    await query.answer("عندك قطة بالفعل.", show_alert=True)
+    return
+
+  await state.set_state(AdoptFlow.waiting_name)
+  await query.answer()
+  if query.message:
+    await query.message.answer("🐾 شنو تريد تسمي قطتك؟ أرسل الاسم فقط.")
+
+
+@router.message(AdoptFlow.waiting_name)
+async def receive_adopt_name(message: Message, state: FSMContext) -> None:
+  name = (message.text or "").strip()
+  if not name:
+    await message.answer("أرسل اسم القطة كنص.")
+    return
+  if len(name) > 40:
+    await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
+    return
+
+  user_id = message.from_user.id
+  await ensure_user(user_id)
+  existing = await get_user_cat(user_id)
+  if existing is not None:
+    await state.clear()
+    await _send_adopted(message, existing)
+    return
+
+  cat = await _create_cat_for_user(user_id, name)
+  await state.clear()
+  await _send_adopted(message, cat)
+
+
+@router.message(Command("adopt", "تبني", "تبنّي"))
+async def cmd_adopt(message: Message) -> None:
+  user_id = message.from_user.id
+  await ensure_user(user_id)
+  existing = await get_user_cat(user_id)
+  if existing is not None:
+    await _send_adopted(message, existing)
+    return
+
+  parts = (message.text or "").split(maxsplit=1)
+  name = parts[1].strip() if len(parts) > 1 else "لوز"
+  if len(name) > 40:
+    await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
+    return
+
+  cat = await _create_cat_for_user(user_id, name)
+  await _send_adopted(message, cat)
