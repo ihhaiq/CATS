@@ -25,7 +25,11 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton(
           text="🐾 تبنّي قطة",
           callback_data="adopt:start",
-        )
+        ),
+        InlineKeyboardButton(
+          text="📖 الدليل",
+          callback_data="guide:open",
+        ),
       ]
     ]
   )
@@ -98,6 +102,22 @@ async def cmd_start(message: Message) -> None:
     "ابدأ من الزر أدناه واختار اسم قطتك.",
     reply_markup=_welcome_keyboard(),
   )
+
+
+@router.callback_query(F.data == "guide:open")
+async def cb_guide_open(query: CallbackQuery) -> None:
+  await query.answer()
+  if query.message:
+    await query.message.answer(
+      "📖 <b>دليل Catibot</b>\n\n"
+      "• 🐾 تبنّى قطة واختار إلها اسم.\n"
+      "• 🍖 حافظ على الشبع بالإطعام.\n"
+      "• 🎾 اللعب والنزهة يرفعون السعادة.\n"
+      "• 😴 راقب عداد الراحة وخلي القطة تنام بوقتها.\n"
+      "• ❤️ الإهمال يأثر على الحب وحالة القطة.\n"
+      "• 🐾 بعض الأفعال تكافئك بعملة قططية تقدر تستخدمها داخل البوت.\n\n"
+      "تگدر ترجع للواجهة وتبدأ من زر <b>تبنّي قطة</b>."
+    )
 
 
 @router.callback_query(F.data == "adopt:start")
