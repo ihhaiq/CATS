@@ -64,16 +64,23 @@ Supported states:
 Use lowercase snake_case names. Transparent PNG is the recommended and canonical
 art format.
 
-Runtime media lookup uses this compatibility order:
+The filesystem is the **source of truth** for official cat art. Runtime lookup
+uses this order:
 
-1. `breed + requested age + state`
-2. `breed + adult + state`
-3. legacy `breed + state`
-4. generic `state`
+1. explicit admin override, when one was intentionally set in `/dev`
+2. `breed + requested age + visual state` on disk
+3. `breed + adult + visual state` on disk
+4. legacy local paths such as `breed/state.png`
+5. Telegram legacy/generic `file_id` fallbacks
 
-Existing JSON keys such as `siamese:sleep` remain valid. Legacy runtime names
-`status` and `cat_angry_sleep` are mapped to `idle` and `angry`
-respectively while retaining old-key fallbacks.
+Rich Messages need Telegram media identifiers, so local PNGs are uploaded
+**lazily on first use**. Catibot stores only cache metadata in JSON
+(`file_id`, SHA-256 hash, media type and relative path). If the deployed PNG
+changes, its hash changes and the file is uploaded again automatically. Asset
+bytes are never stored in JSON.
+
+Existing JSON keys such as `siamese:sleep`, `siamese:status`, and
+`cat_angry_sleep` remain compatible.
 
 To add a new asset, create the `idle.png` identity anchor first for that
 `breed + age_stage`, then derive the other states from the same anchor and put
@@ -82,11 +89,18 @@ Style v1, anchor rules, and examples.
 
 ## Media administration
 
-Use `/dev` as the configured admin, press **تحرير الوسائط**, choose a breed,
-then an age stage, then a state, and upload the photo/video. Telegram media is
-stored as `file_id` values in the local JSON file under the new three-part
-keys. The **فحص مكتبة القطط** button audits the filesystem library against the
-full breed × age × state matrix.
+Normal deployment does **not** require `/dev` uploads. Adding a PNG under
+`bot/assets/cats/` and deploying is enough; the first request uploads and
+caches it automatically.
+
+`/dev` remains for manual overrides, auditing, debugging, and testing. The
+**فحص مكتبة القطط** button audits the filesystem library. Use
+`/dev_media_test` (or **اختبار الصور الغنية**) to send Rich Message tests for
+the Siamese adult `idle`, `hungry`, `sleep`, and `angry` states.
+
+`MEDIA_CACHE_CHAT_ID` is optional. When set, lazy uploads use that chat/channel
+as a silent transport cache. Without it, Catibot temporarily uploads to the
+current user/chat and deletes the transport message best-effort.
 
 ## Railway
 
