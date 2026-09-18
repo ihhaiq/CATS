@@ -63,8 +63,17 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await query.answer()
         return
-    if action == "wake" and random.random() < 0.2:
+    if action == "wake" and cat.get("wake_attempts", 0) == 0:
         cat["action_notice"] = "😾 القطة ترفض النهوض!"
+        cat["wake_attempts"] = 1
+        await update_cat(cat)
+        await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
+        await query.answer()
+        asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+        return
+    if action == "wake" and random.random() < 0.35:
+        cat["action_notice"] = "😾 القطة ترفض النهوض!"
+        cat["wake_attempts"] = cat.get("wake_attempts", 0) + 1
         await update_cat(cat)
         await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
         await query.answer()
@@ -119,13 +128,33 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         if random.random() < 0.15:
             cat["action_notice"] = "🥰 نامت القطة على صدرك!"
     elif action == "sleep":
+        if cat["hunger"] > 70 or cat["happiness"] < 30:
+            cat["action_notice"] = "😾 القطة لا تستطيع النوم الآن، إنها تحتاج رعاية!"
+            media_kind = "cat_angry_sleep"
+            points = 0
+            await update_cat(cat)
+            await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), media_kind))
+            await query.answer()
+            asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+            return
+        if random.random() < 0.25:
+            cat["action_notice"] = "😾 القطة رفضت النوم!"
+            media_kind = "cat_angry_sleep"
+            points = 0
+            await update_cat(cat)
+            await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), media_kind))
+            await query.answer()
+            asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+            return
         minutes = start_sleep(cat)
+        cat["wake_attempts"] = 0
         points = random.choice([0, 1, 2])
         media_kind = "sleep"
         if random.random() < 0.15:
             cat["action_notice"] = "🥰 نامت القطة على صدرك!"
     elif action == "wake":
         wake_now(cat)
+        cat["wake_attempts"] = 0
         media_kind = "status"
         points = 0
     else:

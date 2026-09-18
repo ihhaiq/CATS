@@ -3,23 +3,21 @@ from aiogram.types import InputRichMessage
 
 
 def build_shop_card(items: list[dict], purchases: list[str], points: int) -> InputRichMessage:
-    rows = "".join(
-        f"<tr><td>{item['item_id']}. {item['name']} - 🐾 {item['price']}</td></tr>"
-        for item in items
-    )
+    rows = "".join(f"<tr><td>{purchase}</td></tr>" for purchase in purchases)
+    if not rows:
+        rows = "<tr><td>السلة فارغة</td></tr>"
     buttons = "".join(
-        f'<tg-button type="callback_data" data="shop:buy:{item["item_id"]}">شراء {item["item_id"]}</tg-button>'
+        f'<tg-button type="callback_data" style="primary" data="shop:buy:{item["item_id"]}">{item["name"]} · 🐾 {item["price"]}</tg-button>'
         for item in items
     )
-    cart = "، ".join(purchases) if purchases else "لا توجد مشتريات بعد"
     html = f"""
 <h2>🛍️ المتجر</h2>
+<p>اضغط على المنتج لشرائه:</p>
+<tg-button-row align="center">{buttons}</tg-button-row>
 <table bordered striped compact>
 <tr><th>المشتريات</th></tr>
 {rows}
 </table>
-<p><b>السلة الحالية:</b> {cart}</p>
 <p>🐾 العملة القططية: {points}</p>
-<tg-button-row align="center">{buttons}</tg-button-row>
 """.strip()
     return InputRichMessage(html=html, is_rtl=True)
