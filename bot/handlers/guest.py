@@ -130,6 +130,7 @@ async def guest_message(message: Message) -> None:
             text = "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً."
             title = "لا توجد قطة"
         else:
+            finish_sleep(cat)
             apply_decay(cat)
             await update_cat(cat)
             if action == "status":
