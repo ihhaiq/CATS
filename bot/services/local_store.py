@@ -74,11 +74,8 @@ def sleep_need_percent(cat: dict) -> int:
 
 
 def wake_if_ready(cat: dict) -> bool:
-    if cat.get("sleep_until") and not is_sleeping(cat):
-        cat["sleep_until"] = None
-        cat["sleep_started_at"] = None
-        return True
-    return False
+    """Backward-compatible alias for the canonical sleep-finishing logic."""
+    return finish_sleep(cat)
 
 
 def start_sleep(cat: dict) -> int:
