@@ -7,19 +7,29 @@ from aiogram.types import (
 )
 
 from bot.config import settings
+from bot.services.cat_assets import get_age_stage
 from bot.services.local_store import get_media_file_id_sync, get_media_type_sync
 from bot.services.local_store import is_sleeping, sleep_need_percent
 
 
-def _media_id(kind: str, breed: str) -> str:
-    return get_media_file_id_sync(kind, breed) or get_media_file_id_sync(kind) or getattr(settings, f"{kind}_media_file_id", "") or ""
+def _media_id(kind: str, breed: str, age_stage: str) -> str:
+    return (
+        get_media_file_id_sync(kind, breed, age_stage)
+        or getattr(settings, f"{kind}_media_file_id", "")
+        or ""
+    )
 
 
-def _media_block(kind: str, breed: str) -> tuple[str, InputRichMessageMedia] | None:
-    file_id = _media_id(kind, breed)
+def _media_block(
+    kind: str,
+    breed: str,
+    age_stage: str,
+) -> tuple[str, InputRichMessageMedia] | None:
+    file_id = _media_id(kind, breed, age_stage)
     if not file_id:
         return None
-    if get_media_type_sync(kind, breed) == "video" or get_media_type_sync(kind) == "video" or kind.endswith("_gif") or kind.endswith("_animation"):
+    media_type = get_media_type_sync(kind, breed, age_stage)
+    if media_type == "video" or kind.endswith("_gif") or kind.endswith("_animation"):
         media = InputMediaVideo(media=file_id, duration=5)
         return "video", InputRichMessageMedia(id="cat_video", media=media)
     media = InputMediaPhoto(media=file_id)
@@ -27,7 +37,8 @@ def _media_block(kind: str, breed: str) -> tuple[str, InputRichMessageMedia] | N
 
 
 def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> InputRichMessage:
-    media = _media_block(media_kind, cat["breed"])
+    age_stage = get_age_stage(cat.get("age_days", 30))
+    media = _media_block(media_kind, cat["breed"], age_stage)
     media_markup = ""
     media_list = []
     if media:

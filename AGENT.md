@@ -15,6 +15,121 @@ deployment until all feature handlers use the repository abstraction.
 
 ---
 
+## Official Cat Asset System
+
+Cat assets use one canonical identity:
+
+```text
+structure = breed / age_stage / state
+bot/assets/cats/<breed>/<age_stage>/<state>.png
+```
+
+The canonical runtime media key is:
+
+```text
+<breed>:<age_stage>:<state>
+```
+
+Example: `siamese:kitten:sleep`.
+
+### Supported breeds
+
+- `orange_tabby`
+- `black`
+- `siamese`
+- `british_shorthair_grey`
+- `calico`
+- `white`
+
+### Supported age stages
+
+Age stage is derived from `age_days`; do not persist a second `age_stage`
+field unless a future storage design has a concrete need for it.
+
+- `kitten`: 0-6 days
+- `junior`: 7-20 days
+- `adult`: 21-89 days
+- `senior`: 90+ days
+
+### Supported states
+
+- `idle`
+- `happy`
+- `hungry`
+- `feed`
+- `play`
+- `walk`
+- `talk`
+- `sleep`
+- `angry`
+- `sick`
+
+Use lowercase snake_case names only. Keep the vocabulary centralized in
+`bot/services/cat_assets.py`; do not create duplicate state/age/breed arrays
+inside handlers.
+
+### Lookup and fallback
+
+Resolve media in this order:
+
+1. requested `breed + age_stage + state`
+2. same `breed + adult + state`
+3. legacy `breed + state`
+4. generic `state`
+
+Legacy JSON data is not migrated destructively. Keys such as `siamese:sleep`
+must continue to work.
+
+Compatibility aliases:
+
+- `status -> idle`
+- `cat_angry_sleep -> angry`
+
+When an alias is used, canonical age-aware keys are preferred, then legacy
+original keys are checked so old deployments remain valid.
+
+### Catibot Art Style v1
+
+Official assets must be:
+
+- 2D hand-drawn semi-realistic cartoon cat
+- realistic feline anatomy
+- soft painterly/cel shading
+- muted warm colors
+- restrained thin linework
+- expressive but natural eyes
+- simplified fur shapes
+- full body
+- 1:1 composition
+- transparent background
+- the same recognizable cat identity across ages and states
+
+Forbidden style drift:
+
+- no 3D
+- no chibi
+- no photorealistic rendering
+- no flat vector style
+- no exaggerated oversized eyes
+
+### Anchor production workflow
+
+For every `breed + age_stage`, the first asset produced is `idle.png`. This
+is the **identity anchor**.
+
+Every other state for that exact breed and age must be derived from the anchor.
+Preserve coat pattern, face structure, eye color, body proportions, ears, tail,
+and other identity-defining features. Change only pose, expression, action, or
+condition needed by the state.
+
+Across age stages, preserve the same identity while changing age-appropriate
+proportions. Do not independently regenerate each state from scratch.
+
+Transparent PNG is the canonical delivery format. Do not add empty PNG
+placeholders just to satisfy the directory matrix.
+
+---
+
 ## Build Order
 
 ### 1. Config & secrets
@@ -63,7 +178,7 @@ deployment until all feature handlers use the repository abstraction.
 ### 7. Status view + image caching
 - `status.py` ties together decay + flee check + render.
 - Decide the caching mechanism: a hash column on `cats`, or an in-memory/
-  Redis cache keyed by `(breed, emotion_bucket, title)`. DB column is
+  Redis cache keyed by `(breed, age_stage, state, title)`. DB column is
   simplest to start; Redis only if you outgrow it.
 
 ### 8. Shop & inventory
@@ -80,13 +195,15 @@ deployment until all feature handlers use the repository abstraction.
   should a re-adopted cat start at? Spec suggests ~40% ("earned", not free).
 
 ### 10. Image rendering
-- **You need actual art assets first** — this step blocks on getting cat
-  images per breed (`orange_tabby`, `black`, `siamese`,
-  `british_shorthair_grey`, `calico`, `white`) × 3 emotion states each, plus
-  a collar/overlay template and an Arabic-capable font (e.g. Cairo, Tajawal,
-  or similar — drop the `.ttf` into `bot/assets/fonts/`).
-- Implement `render_cat()` in `image_renderer.py`: composite base + collar
-  text (already using `shape_arabic()`, which is implemented).
+- Produce official assets under
+  `bot/assets/cats/<breed>/<age_stage>/<state>.png` using Catibot Art Style v1.
+- `idle.png` is the identity anchor for every breed + age combination.
+- Do not assume breed alone identifies an asset; age stage and state are both
+  part of the identity.
+- Keep procedural rendering only as a deliberate fallback while the official
+  library is incomplete.
+- If rendering overlays/collars on top of library assets, cache by fields that
+  include at least `breed + age_stage + state` plus any overlay-changing data.
 
 ### 11. Notification sweep — the piece that ties it all together
 - This is the last step because it depends on decay, flee, and rendering all

@@ -11,14 +11,7 @@ TODO (AGENT.md step 4 & 5):
 """
 from datetime import datetime
 
-BREED_POOL = [
-    "orange_tabby",
-    "black",
-    "siamese",
-    "british_shorthair_grey",
-    "calico",
-    "white",
-]
+from bot.services.cat_assets import BREED_POOL
 
 
 def check_cooldown(last_action_time: datetime, cooldown_seconds: int) -> tuple[bool, int]:

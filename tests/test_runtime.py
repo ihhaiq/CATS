@@ -1,18 +1,63 @@
 """Offline checks for the checked-in JSON and Rich Message runtime."""
 import asyncio
-import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from bot.services.cat_assets import (
+    inspect_cat_asset_library,
+    get_age_stage,
+    media_key_candidates,
+    normalize_cat_state,
+)
 from bot.services.rich_card import build_rich_card
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_get_age_stage_boundaries(self) -> None:
+        self.assertEqual(get_age_stage(0), "kitten")
+        self.assertEqual(get_age_stage(6), "kitten")
+        self.assertEqual(get_age_stage(7), "junior")
+        self.assertEqual(get_age_stage(20), "junior")
+        self.assertEqual(get_age_stage(21), "adult")
+        self.assertEqual(get_age_stage(89), "adult")
+        self.assertEqual(get_age_stage(90), "senior")
+        self.assertEqual(get_age_stage(999), "senior")
+
+    def test_legacy_state_mapping(self) -> None:
+        self.assertEqual(normalize_cat_state("status"), "idle")
+        self.assertEqual(normalize_cat_state("cat_angry_sleep"), "angry")
+        self.assertEqual(normalize_cat_state("sleep"), "sleep")
+
+    def test_media_key_precedence(self) -> None:
+        keys = media_key_candidates("sleep", "siamese", "kitten")
+        self.assertEqual(
+            keys[:4],
+            (
+                "siamese:kitten:sleep",
+                "siamese:adult:sleep",
+                "siamese:sleep",
+                "sleep",
+            ),
+        )
+
+    def test_media_key_legacy_alias_candidates(self) -> None:
+        keys = media_key_candidates("status", "siamese", "kitten")
+        self.assertEqual(keys[0], "siamese:kitten:idle")
+        self.assertIn("siamese:status", keys)
+        self.assertIn("status", keys)
+        self.assertIn("idle", keys)
+
+        angry = media_key_candidates("cat_angry_sleep", "siamese", "kitten")
+        self.assertEqual(angry[0], "siamese:kitten:angry")
+        self.assertIn("siamese:cat_angry_sleep", angry)
+
     def test_rich_card_has_state_table_and_actions(self) -> None:
         cat = {
             "name": "Test",
             "breed": "black",
+            "age_days": 5,
             "id_number": "123456",
             "hunger": 20,
             "happiness": 90,
@@ -39,6 +84,7 @@ class RuntimeTests(unittest.TestCase):
                         "owner_id": 777,
                         "name": "Test",
                         "breed": "black",
+                        "age_days": 30,
                         "id_number": "777777",
                         "hunger": 20,
                         "happiness": 90,
@@ -59,6 +105,100 @@ class RuntimeTests(unittest.TestCase):
                 asyncio.run(scenario())
             finally:
                 settings.json_data_file = previous
+
+    def test_media_lookup_fallback_chain_and_missing(self) -> None:
+        from bot.config import settings
+        from bot.services.local_store import get_media_file_id_sync
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = settings.json_data_file
+            data_path = Path(directory) / "catibot.json"
+            settings.json_data_file = str(data_path)
+            data_path.write_text(
+                json.dumps(
+                    {
+                        "media": {
+                            "siamese:kitten:sleep": "exact",
+                            "black:adult:sleep": "adult-fallback",
+                            "calico:sleep": "legacy-fallback",
+                            "hungry": "generic-fallback",
+                            "siamese:kitten:idle": "idle-canonical",
+                            "siamese:kitten:angry": "angry-canonical",
+                        },
+                        "media_types": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            try:
+                self.assertEqual(
+                    get_media_file_id_sync("sleep", "siamese", "kitten"),
+                    "exact",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("sleep", "black", "kitten"),
+                    "adult-fallback",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("sleep", "calico", "kitten"),
+                    "legacy-fallback",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("hungry", "white", "kitten"),
+                    "generic-fallback",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("status", "siamese", "kitten"),
+                    "idle-canonical",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("cat_angry_sleep", "siamese", "kitten"),
+                    "angry-canonical",
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("sick", "white", "senior"),
+                    "",
+                )
+            finally:
+                settings.json_data_file = previous
+
+    def test_set_media_file_writes_three_part_key(self) -> None:
+        from bot.config import settings
+        from bot.services.local_store import get_media_file_id_sync, set_media_file
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = settings.json_data_file
+            settings.json_data_file = str(Path(directory) / "catibot.json")
+            try:
+                asyncio.run(
+                    set_media_file(
+                        "sleep",
+                        "file-123",
+                        "photo",
+                        breed="white",
+                        age_stage="senior",
+                    )
+                )
+                self.assertEqual(
+                    get_media_file_id_sync("sleep", "white", "senior"),
+                    "file-123",
+                )
+            finally:
+                settings.json_data_file = previous
+
+    def test_asset_library_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            anchor = root / "siamese" / "kitten" / "idle.png"
+            anchor.parent.mkdir(parents=True)
+            anchor.touch()
+
+            report = inspect_cat_asset_library(root)
+            self.assertEqual(report.total_expected, 240)
+            self.assertEqual(report.present, 1)
+            self.assertEqual(report.missing_count, 239)
+            self.assertNotIn("siamese/kitten/idle.png", report.missing)
+            self.assertIn("siamese/kitten/sleep.png", report.missing)
 
 
 if __name__ == "__main__":
