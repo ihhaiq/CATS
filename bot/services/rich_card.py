@@ -45,6 +45,7 @@ def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> Input
     notice_html = f"<p><b>{notice}</b></p>" if notice else ""
     wake_action = "wake" if sleeping else "sleep"
     wake_label = "إيقاظ" if sleeping else "نوم"
+    callback_prefix = f"cat:{cat['owner_id']}"
     fullness = 100 - cat["hunger"]
     sleep_need = sleep_need_percent(cat)
     html = f"""
@@ -62,13 +63,13 @@ def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> Input
 </table>
 <p>🐾 العملة القططية: {points}</p>
 <tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="cat:feed">إطعام</tg-button>
-<tg-button type="callback_data" style="primary" data="cat:play">لعب</tg-button>
-<tg-button type="callback_data" data="cat:walk">نزهة</tg-button>
+<tg-button type="callback_data" style="success" data="{callback_prefix}:feed">إطعام</tg-button>
+<tg-button type="callback_data" style="primary" data="{callback_prefix}:play">لعب</tg-button>
+<tg-button type="callback_data" data="{callback_prefix}:walk">نزهة</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
-<tg-button type="callback_data" data="cat:talk">تحدث</tg-button>
-<tg-button type="callback_data" data="cat:{wake_action}">{wake_label}</tg-button>
+<tg-button type="callback_data" data="{callback_prefix}:talk">تحدث</tg-button>
+<tg-button type="callback_data" data="{callback_prefix}:{wake_action}">{wake_label}</tg-button>
 </tg-button-row>
 {sleep_note}
 {notice_html}
