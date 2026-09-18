@@ -86,24 +86,23 @@ changing age-appropriate proportions and features.
 
 ## Runtime lookup and fallback
 
-The canonical runtime key is:
+The files in this directory are the authoritative official assets. The canonical
+runtime identity is:
 
 ```text
 breed:age_stage:state
 ```
 
-Example:
+Example: `siamese:adult:sleep`.
 
-```text
-siamese:kitten:sleep
-```
+Catibot resolves the visual state centrally, then searches the filesystem:
+requested age first, adult fallback second, then legacy-compatible local paths.
+Only after local resolution fails does it use old Telegram `file_id` entries.
 
-Runtime media lookup uses this fallback order:
-
-1. requested `breed + age_stage + state`
-2. same `breed + adult + state`
-3. legacy `breed + state`
-4. generic `state`
+A local PNG is uploaded lazily the first time Telegram needs it. JSON stores
+only its reusable `file_id`, SHA-256, media type and relative path. Replacing a
+PNG in Git changes the hash and automatically refreshes the Telegram cache on
+next use. There is no startup upload of the full library.
 
 Legacy state aliases are supported:
 
@@ -123,3 +122,16 @@ Existing JSON media entries such as `siamese:sleep` remain valid.
 
 Do not add empty placeholder PNG files. Missing assets are intentionally handled
 by runtime fallbacks until the library is complete.
+
+
+## Current Siamese adult smoke-test assets
+
+The runtime test command expects these official files:
+
+- `siamese/adult/idle.png`
+- `siamese/adult/hungry.png`
+- `siamese/adult/sleep.png`
+- `siamese/adult/angry.png`
+
+After deploy, run `/dev_media_test` as an admin to exercise all four through
+the same Rich Message path used by the bot.
