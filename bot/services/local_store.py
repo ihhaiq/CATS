@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bot.config import settings
-from bot.services.cat_assets import media_key_candidates, normalize_cat_state, resolve_media_value
+from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
 _lock = asyncio.Lock()
 
@@ -338,15 +338,16 @@ async def get_media_override(
     breed: str,
     age_stage: str,
 ) -> dict | None:
-    """Resolve an explicit /dev override using the normal compatibility keys."""
+    """Return only an exact explicit /dev override for this asset identity."""
     async with _lock:
         overrides = _read().get("media_overrides", {})
-        for key in media_key_candidates(kind, breed, age_stage):
-            value = overrides.get(key)
-            if isinstance(value, dict) and value.get("file_id"):
-                result = dict(value)
-                result["key"] = key
-                return result
+        state = normalize_cat_state(kind)
+        key = f"{breed}:{age_stage}:{state}"
+        value = overrides.get(key)
+        if isinstance(value, dict) and value.get("file_id"):
+            result = dict(value)
+            result["key"] = key
+            return result
         return None
 
 
