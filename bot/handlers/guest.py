@@ -210,6 +210,7 @@ async def guest_message(message: Message) -> None:
                     items,
                     [],
                     await get_user_points(user_id),
+                    owner_id=user_id,
                 ),
             ),
         )
