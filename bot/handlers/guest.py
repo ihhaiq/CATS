@@ -5,8 +5,9 @@ from datetime import datetime
 from aiogram import Router
 from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
 
+from bot.services.action_locks import user_action_lock
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import apply_decay, ensure_user, get_user_cat, update_cat
+from bot.services.local_store import ensure_user, get_user_cat, refresh_cat_state, update_cat
 from bot.services.local_store import create_cat, now_iso
 from bot.services.local_store import get_user_points
 from bot.services.rich_card import build_rich_card
@@ -109,6 +110,7 @@ async def guest_message(message: Message) -> None:
                 "last_fed": stamp,
                 "last_played": stamp,
                 "last_walk": stamp,
+                "last_talked": stamp,
                 "last_decay_at": stamp,
                 "sleep_day": datetime.utcnow().date().isoformat(),
                 "slept_today_hours": 10.0,
@@ -130,7 +132,7 @@ async def guest_message(message: Message) -> None:
             text = "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً."
             title = "لا توجد قطة"
         else:
-            apply_decay(cat)
+            refresh_cat_state(cat)
             await update_cat(cat)
             if action == "status":
                 result = InlineQueryResultArticle(
