@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bot.config import settings
+from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
 _lock = asyncio.Lock()
 
@@ -216,35 +217,86 @@ async def award_points(user_id: int, delta: int, reason: str) -> int:
         return user["points"]
 
 
-async def get_media_file_id(kind: str, breed: str | None = None) -> str:
+async def get_media_file_id(
+    kind: str,
+    breed: str | None = None,
+    age_stage: str | None = None,
+) -> str:
     async with _lock:
-        data = _read().get("media", {})
-        return data.get(f"{breed}:{kind}", "") if breed else data.get(kind, "")
+        value, _ = resolve_media_value(
+            _read().get("media", {}),
+            kind,
+            breed,
+            age_stage,
+        )
+        return value
 
 
-def get_media_file_id_sync(kind: str, breed: str | None = None) -> str:
-    data = _read().get("media", {})
-    if breed and data.get(f"{breed}:{kind}"):
-        return data[f"{breed}:{kind}"]
-    return data.get(kind, "")
+def get_media_file_id_sync(
+    kind: str,
+    breed: str | None = None,
+    age_stage: str | None = None,
+) -> str:
+    value, _ = resolve_media_value(
+        _read().get("media", {}),
+        kind,
+        breed,
+        age_stage,
+    )
+    return value
 
 
-def get_media_type_sync(kind: str, breed: str | None = None) -> str:
-    data = _read().get("media_types", {})
-    return data.get(f"{breed}:{kind}", data.get(kind, "photo")) if breed else data.get(kind, "photo")
+def get_media_type_sync(
+    kind: str,
+    breed: str | None = None,
+    age_stage: str | None = None,
+) -> str:
+    value, _ = resolve_media_value(
+        _read().get("media_types", {}),
+        kind,
+        breed,
+        age_stage,
+        default="photo",
+    )
+    return value or "photo"
 
 
-async def set_media_file_id(kind: str, file_id: str) -> None:
+async def set_media_file_id(
+    kind: str,
+    file_id: str,
+    breed: str | None = None,
+    age_stage: str | None = None,
+) -> None:
     async with _lock:
         data = _read()
-        data.setdefault("media", {})[kind] = file_id
+        state = normalize_cat_state(kind)
+        if breed and age_stage:
+            key = f"{breed}:{age_stage}:{state}"
+        elif breed:
+            key = f"{breed}:{kind}"
+        else:
+            key = kind
+        data.setdefault("media", {})[key] = file_id
         _write(data)
 
 
-async def set_media_file(kind: str, file_id: str, media_type: str, breed: str | None = None) -> None:
+async def set_media_file(
+    kind: str,
+    file_id: str,
+    media_type: str,
+    breed: str | None = None,
+    age_stage: str | None = None,
+) -> None:
     async with _lock:
         data = _read()
-        key = f"{breed}:{kind}" if breed else kind
+        state = normalize_cat_state(kind)
+        if breed and age_stage:
+            key = f"{breed}:{age_stage}:{state}"
+        elif breed:
+            # Keep the two-part write contract for old callers and JSON data.
+            key = f"{breed}:{kind}"
+        else:
+            key = kind
         data.setdefault("media", {})[key] = file_id
         data.setdefault("media_types", {})[key] = media_type
         _write(data)
