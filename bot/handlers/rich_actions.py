@@ -118,6 +118,15 @@ async def handle_rich_action(query: CallbackQuery) -> None:
     if woke:
         await update_cat(cat)
 
+    if action == "status":
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            build_rich_card(cat, await get_user_points(user_id), "status"),
+        )
+        await query.answer()
+        return
+
     if is_sleeping(cat) and action != "wake":
         await update_cat(cat)
         await query.answer()
