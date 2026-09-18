@@ -144,7 +144,7 @@ def inspect_cat_asset_library(root: Path | None = None) -> AssetLibraryReport:
                 if any(base.with_suffix(ext).is_file() for ext in _ASSET_EXTENSIONS):
                     present += 1
                 else:
-                    missing.append(str(asset_relative_path(breed, age_stage, state)))
+                    missing.append(asset_relative_path(breed, age_stage, state).as_posix())
 
     total = len(BREED_POOL) * len(AGE_STAGES) * len(CAT_STATES)
     return AssetLibraryReport(
