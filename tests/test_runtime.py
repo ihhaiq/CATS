@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from bot.services.rich_card import build_rich_card
+from bot.services.rich_card import build_adoption_card, build_rich_card
 from bot.services.shop_card import build_shop_card
 
 
@@ -38,6 +38,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الراحة والنوم", card.html)
         self.assertIn("cat:777:feed", card.html)
         self.assertIn("cat:777:play", card.html)
+
+    def test_adoption_card_has_status_callback_without_command_text(self) -> None:
+        stamp = datetime.utcnow().isoformat()
+        card = build_adoption_card(_cat(stamp))
+        self.assertIn("تم تبني", card.html)
+        self.assertIn("cat:777:status", card.html)
+        self.assertIn("عرض الحالة", card.html)
+        self.assertNotIn("/status", card.html)
 
     def test_rich_card_escapes_user_supplied_name(self) -> None:
         stamp = datetime.utcnow().isoformat()
