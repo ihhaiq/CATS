@@ -11,6 +11,7 @@ from aiogram.types import Message
 from bot.services.action_locks import user_action_lock
 from bot.services.economy import assign_random_breed
 from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
+from bot.services.rich_card import build_adoption_card
 
 router = Router(name="adopt")
 
@@ -56,9 +57,7 @@ async def cmd_adopt(message: Message) -> None:
         }
         await create_cat(cat)
 
-    await message.answer(
-        f"🐾 تم تبني {name}!\n"
-        f"السلالة: {cat['breed']}\n"
-        f"رقمها: #{cat['id_number']}\n"
-        "استخدم /status لمشاهدتها."
+    await message.bot.send_rich_message(
+        chat_id=message.chat.id,
+        rich_message=build_adoption_card(cat),
     )
