@@ -1,6 +1,8 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
+import random
+import secrets
 from datetime import datetime
 from pathlib import Path
 
@@ -36,8 +38,12 @@ def _read() -> dict:
 
 
 def _write(data: dict) -> None:
+    """Write JSON atomically so a crash cannot leave a half-written store."""
     path = _path()
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(path)
 
 
 def now_iso() -> str:
@@ -54,14 +60,17 @@ def is_sleeping(cat: dict) -> bool:
 
 
 def sleep_need_percent(cat: dict) -> int:
-    """Return rest/readiness: 100 is rested, 65 starts sleep requests."""
+    """Return rest/readiness. 100 is rested; the meter falls in visible minute steps."""
     if is_sleeping(cat):
         return 100
     last_wake = cat.get("last_wake_at")
     if not last_wake:
         return 100
-    active_hours = max(0, (datetime.utcnow() - parse_time(last_wake)).total_seconds() / 3600)
-    return max(0, min(100, round(100 - active_hours * 5)))
+    awake_minutes = max(0.0, (datetime.utcnow() - parse_time(last_wake)).total_seconds() / 60)
+    interval = max(1, settings.sleep_need_drop_interval_minutes)
+    drop = max(1, settings.sleep_need_drop_per_interval)
+    elapsed_intervals = int(awake_minutes // interval)
+    return max(0, min(100, 100 - elapsed_intervals * drop))
 
 
 def wake_if_ready(cat: dict) -> bool:
@@ -79,56 +88,117 @@ def start_sleep(cat: dict) -> int:
         cat["sleep_day"] = today
         cat["slept_today_hours"] = 0.0
     remaining = max(0.5, 10.0 - float(cat.get("slept_today_hours", 0)))
-    import random
     hours = min(remaining, random.uniform(0.5, 2.5))
     cat["sleep_started_at"] = now.isoformat()
-    cat["sleep_until"] = (now.timestamp() + hours * 3600)
-    cat["sleep_until"] = datetime.fromtimestamp(cat["sleep_until"]).isoformat()
+    cat["sleep_until"] = datetime.fromtimestamp(now.timestamp() + hours * 3600).isoformat()
     cat["sleep_planned_hours"] = hours
+    # Decay is frozen during sleep, so start a fresh decay window here.
+    cat["last_decay_at"] = now.isoformat()
     return round(hours * 60)
 
 
 def finish_sleep(cat: dict) -> bool:
-    if not cat.get("sleep_until") or is_sleeping(cat):
+    sleep_until = cat.get("sleep_until")
+    if not sleep_until or is_sleeping(cat):
         return False
+    finished_at = parse_time(sleep_until)
     cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + float(cat.get("sleep_planned_hours", 0))
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
-    cat["last_wake_at"] = datetime.utcnow().isoformat()
+    # Use the planned wake time, not the time somebody happened to open the bot.
+    cat["last_wake_at"] = finished_at.isoformat()
+    cat["last_decay_at"] = finished_at.isoformat()
     return True
 
 
 def wake_now(cat: dict) -> bool:
     if not cat.get("sleep_until"):
         return False
+    moment = datetime.utcnow()
     started = cat.get("sleep_started_at")
     if started:
-        elapsed = max(0, (datetime.utcnow() - parse_time(started)).total_seconds() / 3600)
+        elapsed = max(0, (moment - parse_time(started)).total_seconds() / 3600)
         cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
             elapsed, float(cat.get("sleep_planned_hours", 0))
         )
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
-    cat["last_wake_at"] = datetime.utcnow().isoformat()
+    cat["last_wake_at"] = moment.isoformat()
+    cat["last_decay_at"] = moment.isoformat()
     return True
 
 
-def clear_action_notice(cat: dict) -> None:
+def set_action_notice(cat: dict, text: str) -> str:
+    """Set a notice and return a token identifying this exact notice."""
+    token = secrets.token_hex(8)
+    cat["action_notice"] = text
+    cat["action_notice_token"] = token
+    return token
+
+
+def clear_action_notice(cat: dict, expected_token: str | None = None) -> bool:
+    """Clear only the expected notice; stale delayed tasks become harmless."""
+    if expected_token is not None and cat.get("action_notice_token") != expected_token:
+        return False
+    changed = "action_notice" in cat or "action_notice_token" in cat or "action_notice_until" in cat
     cat.pop("action_notice", None)
+    cat.pop("action_notice_token", None)
     cat.pop("action_notice_until", None)
+    return changed
+
+
+def _consume_decay(cat: dict, key: str, amount: float) -> int:
+    total = max(0.0, float(cat.get(key, 0.0))) + max(0.0, amount)
+    whole = int(total)
+    cat[key] = total - whole
+    return whole
 
 
 def apply_decay(cat: dict) -> None:
+    """Apply elapsed decay without losing fractional progress between frequent sweeps."""
     now = datetime.utcnow()
     last_decay = parse_time(cat.get("last_decay_at") or cat.get("created_at") or cat["last_fed"])
-    hours = max(0, (now - last_decay).total_seconds() / 3600)
-    cat["hunger"] = min(100, cat["hunger"] + int(hours * 4))
-    cat["happiness"] = max(0, cat["happiness"] - int(hours * 3))
+
+    # Sleep freezes hunger/happiness/love decay. Advancing the clock here prevents
+    # the sleeping period from being charged retroactively on wake.
+    if is_sleeping(cat):
+        cat["last_decay_at"] = now.isoformat()
+        return
+
+    hours = max(0.0, (now - last_decay).total_seconds() / 3600)
+
+    if cat["hunger"] >= 100:
+        cat["hunger_decay_carry"] = 0.0
+    else:
+        hunger_up = _consume_decay(cat, "hunger_decay_carry", hours * 4)
+        cat["hunger"] = min(100, cat["hunger"] + hunger_up)
+
+    if cat["happiness"] <= 0:
+        cat["happiness_decay_carry"] = 0.0
+    else:
+        happiness_down = _consume_decay(cat, "happiness_decay_carry", hours * 3)
+        cat["happiness"] = max(0, cat["happiness"] - happiness_down)
+
     if cat["hunger"] > 70 or cat["happiness"] < 30:
-        cat["love_bar"] = max(0, cat["love_bar"] - int(hours * 2))
+        if cat["love_bar"] <= 0:
+            cat["love_decay_carry"] = 0.0
+        else:
+            love_down = _consume_decay(cat, "love_decay_carry", hours * 2)
+            cat["love_bar"] = max(0, cat["love_bar"] - love_down)
+    else:
+        # Neglect must be continuous; don't carry a partial penalty through recovery.
+        cat["love_decay_carry"] = 0.0
+
     cat["last_decay_at"] = now.isoformat()
+
+
+def refresh_cat_state(cat: dict) -> bool:
+    """Finish elapsed sleep first, then apply only decay that happened while awake."""
+    woke = finish_sleep(cat)
+    apply_decay(cat)
+    return woke
 
 
 async def ensure_user(user_id: int) -> dict:
@@ -177,6 +247,19 @@ async def get_active_cats() -> list[dict]:
 async def create_cat(cat: dict) -> dict:
     async with _lock:
         data = _read()
+        used_ids = {str(item.get("id_number")) for item in data["cats"] if item.get("id_number") is not None}
+        preferred = str(cat.get("id_number", ""))
+        if not preferred or preferred in used_ids:
+            for _ in range(100):
+                candidate = str(random.randint(100000, 999999))
+                if candidate not in used_ids:
+                    cat["id_number"] = candidate
+                    break
+            else:
+                raise RuntimeError("could not allocate a unique cat id_number")
+        else:
+            cat["id_number"] = preferred
+
         cat["cat_id"] = max((item.get("cat_id", 0) for item in data["cats"]), default=0) + 1
         data["cats"].append(cat)
         _write(data)
