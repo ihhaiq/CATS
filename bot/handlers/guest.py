@@ -10,6 +10,8 @@ from bot.services.local_store import apply_decay, ensure_user, get_user_cat, upd
 from bot.services.local_store import create_cat, now_iso
 from bot.services.local_store import get_user_points
 from bot.services.rich_card import build_rich_card
+from bot.services.shop import list_items, open_shop
+from bot.services.shop_card import build_shop_card
 
 router = Router(name="guest")
 
@@ -29,6 +31,8 @@ _ALIASES = {
     "adopt": "adopt",
     "تبني": "adopt",
     "تبنّي": "adopt",
+    "shop": "shop",
+    "متجر": "shop",
 }
 
 
@@ -46,10 +50,10 @@ def _requested_command(message: Message) -> tuple[str | None, str]:
     text = (message.text or "").strip()
     words = text.split()
     if not words:
-        return "status", ""
+        return None, ""
     words = words[1:] if words[0].startswith("@") else words
     if not words:
-        return "status", ""
+        return None, ""
     command = words[0].lstrip("/").split("@", 1)[0].casefold()
     return _ALIASES.get(command), " ".join(words[1:]).strip()
 
@@ -60,6 +64,21 @@ async def guest_message(message: Message) -> None:
         return
 
     action, argument = _requested_command(message)
+    if action is None:
+        return
+    if action == "shop":
+        user_id = message.from_user.id
+        items = await open_shop(user_id)
+        result = InlineQueryResultArticle(
+            id="guest-shop",
+            title="المتجر",
+            description="افتح المتجر واشترِ بالأزرار",
+            input_message_content=InputRichMessageContent(
+                rich_message=build_shop_card(items, [], await get_user_points(user_id)),
+            ),
+        )
+        await message.bot.answer_guest_query(message.guest_query_id, result)
+        return
     if action == "adopt":
         user_id = message.from_user.id
         await ensure_user(user_id)
@@ -103,9 +122,6 @@ async def guest_message(message: Message) -> None:
                 "استخدم @RichsCatBot حالة لمشاهدة الحالة."
             )
             title = "تم التبني"
-    elif action is None:
-        text = "الأوامر المتاحة: حالة/status، تبني/adopt، اطعام/feed، لعب/play، نزهة/walk"
-        title = "أوامر Catibot"
     elif action != "adopt":
         user_id = message.from_user.id
         await ensure_user(user_id)

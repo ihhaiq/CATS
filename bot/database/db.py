@@ -1,11 +1,14 @@
 """Storage initialization for local JSON mode and future PostgreSQL mode."""
 import json
+import logging
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import settings
 from bot.database.models import Base
+
+logger = logging.getLogger("catibot.database")
 
 engine = None
 async_session = None
@@ -53,8 +56,13 @@ async def init_db() -> None:
         _init_json_store()
         return
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as exc:
+        logger.warning("PostgreSQL unavailable (%s); falling back to JSON storage", exc)
+        settings.storage_backend = "json"
+        _init_json_store()
 
 
 def get_session() -> AsyncSession:

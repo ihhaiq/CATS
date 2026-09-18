@@ -21,7 +21,18 @@ def _read() -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         return {"users": {}, "cats": [], "items": [], "user_inventory": [], "points_log": [], "media": {}}
-    return json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for key, default in {
+        "users": {},
+        "cats": [],
+        "items": [],
+        "user_inventory": [],
+        "points_log": [],
+        "media": {},
+        "media_types": {},
+    }.items():
+        data.setdefault(key, default)
+    return data
 
 
 def _write(data: dict) -> None:
@@ -126,8 +137,10 @@ async def ensure_user(user_id: int) -> dict:
         user = data["users"].setdefault(str(user_id), {
             "user_id": user_id,
             "points": 100,
+            "purchases": [],
             "created_at": now_iso(),
         })
+        user.setdefault("purchases", [])
         _write(data)
         return user
 
@@ -135,6 +148,19 @@ async def ensure_user(user_id: int) -> dict:
 async def get_user_points(user_id: int) -> int:
     user = await ensure_user(user_id)
     return user["points"]
+
+
+async def clear_purchases(user_id: int) -> None:
+    async with _lock:
+        data = _read()
+        user = data["users"].setdefault(str(user_id), {"user_id": user_id, "points": 100, "purchases": [], "created_at": now_iso()})
+        user["purchases"] = []
+        _write(data)
+
+
+async def get_purchases(user_id: int) -> list[str]:
+    user = await ensure_user(user_id)
+    return list(user.get("purchases", []))
 
 
 async def get_user_cat(user_id: int) -> dict | None:

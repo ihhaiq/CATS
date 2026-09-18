@@ -24,6 +24,7 @@ class Settings:
     cat_angry_sleep_media_file_id: str = os.getenv("CAT_ANGRY_SLEEP_MEDIA_FILE_ID", "")
     webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")  # e.g. https://catibot.up.railway.app
     webhook_path: str = "/webhook"
+    port: int = int(os.getenv("PORT", "8080"))
     admin_ids: list[int] = None
 
     # Cooldowns (seconds)

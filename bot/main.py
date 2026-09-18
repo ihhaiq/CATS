@@ -48,7 +48,7 @@ def main() -> None:
         app = web.Application()
         SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=settings.webhook_path)
         setup_application(app, dp, bot=bot)
-        web.run_app(app, port=8080)
+        web.run_app(app, port=settings.port)
     else:
         # local dev fallback: long polling
         asyncio.run(dp.start_polling(bot))
