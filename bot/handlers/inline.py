@@ -2,7 +2,7 @@
 from aiogram import Router
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
-from bot.services.local_store import apply_decay, ensure_user, get_user_cat, update_cat
+from bot.services.local_store import ensure_user, get_user_cat, refresh_cat_state, update_cat
 
 router = Router(name="inline")
 
@@ -48,7 +48,7 @@ async def inline_cat(inline_query: InlineQuery) -> None:
         text = "🐾 ما عندك قطة بعد. أرسل /adopt اسم_القطة إلى البوت أولاً."
         title = "لا توجد قطة"
     else:
-        apply_decay(cat)
+        refresh_cat_state(cat)
         await update_cat(cat)
         if action == "feed":
             preview = dict(cat)
