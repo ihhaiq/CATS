@@ -24,6 +24,7 @@ TODO (AGENT.md step 11) — this is the piece that ties everything else together
      AsyncIOScheduler, started from main.py's on_startup.
 """
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -44,6 +45,7 @@ from bot.services.local_store import (
 
 _scheduler: Any = None
 _fallback_task: asyncio.Task | None = None
+logger = logging.getLogger("catibot.notification_sweep")
 
 
 async def _sweep(bot: Bot) -> None:
@@ -74,8 +76,8 @@ async def _sweep(bot: Bot) -> None:
          for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
             try:
                await bot.send_message(user_id, message)
-            except Exception:
-               pass
+            except Exception as exc:
+               logger.warning("Failed to notify user_id=%s: %s", user_id, exc)
          cat["last_notified_state"] = state
          cat["last_notified_at"] = datetime.utcnow().isoformat()
       elif state is None:
@@ -94,6 +96,11 @@ def start_notification_sweep(bot: Bot) -> None:
    async def fallback_loop() -> None:
       while True:
          await asyncio.sleep(settings.notification_interval_minutes * 60)
-         await _sweep(bot)
+         try:
+            await _sweep(bot)
+         except asyncio.CancelledError:
+            raise
+         except Exception:
+            logger.exception("Notification sweep failed")
 
    _fallback_task = asyncio.create_task(fallback_loop())
