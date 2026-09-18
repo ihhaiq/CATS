@@ -64,7 +64,7 @@ class RuntimeTests(unittest.TestCase):
             "love_bar": 100,
             "slept_today_hours": 10,
         }
-        card = build_rich_card(cat, 42)
+        card = asyncio.run(build_rich_card(None, cat, 42))
         self.assertIn("الشبع", card.html)
         self.assertIn("الراحة والنوم", card.html)
         self.assertIn("cat:feed", card.html)
