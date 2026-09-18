@@ -82,14 +82,28 @@ async def _clear_notice_later(query: CallbackQuery, user_id: int, notice_token: 
         )
 
 
+def _parse_action_data(data: str) -> tuple[int | None, str | None]:
+    parts = data.split(":")
+    if len(parts) == 2:
+        # Legacy cards created before owner-bound callback data.
+        return None, parts[1]
+    if len(parts) == 3 and parts[1].isdigit():
+        return int(parts[1]), parts[2]
+    return None, None
+
+
 @router.callback_query(lambda query: query.data and query.data.startswith("cat:"))
 async def handle_rich_action(query: CallbackQuery) -> None:
-    action = query.data.split(":", 1)[1]
+    owner_id, action = _parse_action_data(query.data)
     if action not in _ACTIONS:
         await query.answer()
         return
 
-    user_id = query.from_user.id
+    if owner_id is not None and query.from_user.id != owner_id:
+        await query.answer("هذه الأزرار خاصة بصاحب القطة.", show_alert=True)
+        return
+
+    user_id = owner_id or query.from_user.id
     async with user_action_lock(user_id):
         await _handle_rich_action(query, user_id, action)
 
