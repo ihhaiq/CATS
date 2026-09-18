@@ -1,4 +1,5 @@
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -8,6 +9,28 @@ from bot.services.shop import buy_item, list_items, open_shop
 from bot.services.shop_card import build_shop_card
 
 router = Router(name="shop")
+
+
+async def _edit_shop_card(query, card) -> bool:
+  try:
+    if query.inline_message_id:
+      await query.bot.edit_message_text(
+        inline_message_id=query.inline_message_id,
+        rich_message=card,
+      )
+      return True
+    if query.message:
+      await query.bot.edit_message_text(
+        chat_id=query.message.chat.id,
+        message_id=query.message.message_id,
+        rich_message=card,
+      )
+      return True
+    return False
+  except TelegramBadRequest as exc:
+    if "message is not modified" in str(exc).lower():
+      return False
+    raise
 
 
 @router.message(Command("shop", "متجر"))
@@ -29,10 +52,7 @@ async def cb_buy(query) -> None:
   await query.answer(result)
   items = await list_items()
   card = build_shop_card(items, await get_purchases(query.from_user.id), balance)
-  if query.inline_message_id:
-    await query.bot.edit_message_text(inline_message_id=query.inline_message_id, rich_message=card)
-  elif query.message:
-    await query.bot.edit_message_text(chat_id=query.message.chat.id, message_id=query.message.message_id, rich_message=card)
+  await _edit_shop_card(query, card)
 
 
 @router.message(Command("buy", "شراء"))

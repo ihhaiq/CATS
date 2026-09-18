@@ -11,7 +11,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from bot.services.local_store import apply_decay, ensure_user, get_user_cat, get_user_points, update_cat
+from bot.services.local_store import apply_decay, ensure_user, finish_sleep, get_user_cat, get_user_points, update_cat
 from bot.services.rich_card import build_rich_card
 
 router = Router(name="status")
@@ -25,6 +25,7 @@ async def cmd_status(message: Message) -> None:
   if cat is None:
     await message.answer("ما عندك قطة. استخدم /adopt اسم_القطة أولاً.")
     return
+  finish_sleep(cat)
   apply_decay(cat)
   if cat["love_bar"] <= 0:
     cat["is_fled"] = True

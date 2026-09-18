@@ -54,14 +54,18 @@ def is_sleeping(cat: dict) -> bool:
 
 
 def sleep_need_percent(cat: dict) -> int:
-    """Return rest/readiness: 100 is rested, 65 starts sleep requests."""
+    """Return rest/readiness: 100 is rested, 65 or lower starts sleep requests."""
     if is_sleeping(cat):
         return 100
     last_wake = cat.get("last_wake_at")
     if not last_wake:
         return 100
-    active_hours = max(0, (datetime.utcnow() - parse_time(last_wake)).total_seconds() / 3600)
-    return max(0, min(100, round(100 - active_hours * 5)))
+    active_minutes = max(
+        0,
+        (datetime.utcnow() - parse_time(last_wake)).total_seconds() / 60,
+    )
+    steps = int(active_minutes // settings.sleep_decay_interval_minutes)
+    return max(0, min(100, 100 - steps * settings.sleep_decay_amount))
 
 
 def wake_if_ready(cat: dict) -> bool:
@@ -82,8 +86,7 @@ def start_sleep(cat: dict) -> int:
     import random
     hours = min(remaining, random.uniform(0.5, 2.5))
     cat["sleep_started_at"] = now.isoformat()
-    cat["sleep_until"] = (now.timestamp() + hours * 3600)
-    cat["sleep_until"] = datetime.fromtimestamp(cat["sleep_until"]).isoformat()
+    cat["sleep_until"] = datetime.fromtimestamp(now.timestamp() + hours * 3600).isoformat()
     cat["sleep_planned_hours"] = hours
     return round(hours * 60)
 
@@ -118,6 +121,7 @@ def wake_now(cat: dict) -> bool:
 def clear_action_notice(cat: dict) -> None:
     cat.pop("action_notice", None)
     cat.pop("action_notice_until", None)
+    cat.pop("action_notice_token", None)
 
 
 def apply_decay(cat: dict) -> None:

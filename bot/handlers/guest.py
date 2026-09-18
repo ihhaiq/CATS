@@ -6,7 +6,7 @@ from aiogram import Router
 from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
 
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import apply_decay, ensure_user, get_user_cat, update_cat
+from bot.services.local_store import apply_decay, ensure_user, finish_sleep, get_user_cat, update_cat
 from bot.services.local_store import create_cat, now_iso
 from bot.services.local_store import get_user_points
 from bot.services.rich_card import build_rich_card
@@ -130,6 +130,7 @@ async def guest_message(message: Message) -> None:
             text = "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً."
             title = "لا توجد قطة"
         else:
+            finish_sleep(cat)
             apply_decay(cat)
             await update_cat(cat)
             if action == "status":
