@@ -25,7 +25,7 @@ from bot.services.local_store import (
 )
 
 logger = logging.getLogger("catibot.media_runtime")
-_upload_locks: dict[str, asyncio.Lock] = {}
+_upload_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
 @dataclass(frozen=True)
@@ -39,10 +39,11 @@ class ResolvedCatMedia:
 
 
 def _lock_for(cache_key: str) -> asyncio.Lock:
-    lock = _upload_locks.get(cache_key)
+    loop_key = (id(asyncio.get_running_loop()), cache_key)
+    lock = _upload_locks.get(loop_key)
     if lock is None:
         lock = asyncio.Lock()
-        _upload_locks[cache_key] = lock
+        _upload_locks[loop_key] = lock
     return lock
 
 
