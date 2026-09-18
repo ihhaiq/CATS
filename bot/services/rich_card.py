@@ -58,7 +58,7 @@ def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> Input
 <tr><td>الشبع</td><td>{fullness}%</td></tr>
 <tr><td>السعادة</td><td>{cat['happiness']}%</td></tr>
 <tr><td>الحب</td><td>{cat['love_bar']}%</td></tr>
-<tr><td>الحاجة للنوم</td><td>{sleep_need}%</td></tr>
+<tr><td>الراحة والنوم</td><td>{sleep_need}%</td></tr>
 </table>
 <p>🐾 العملة القططية: {points}</p>
 <tg-button-row align="center">

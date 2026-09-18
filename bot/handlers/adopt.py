@@ -53,6 +53,7 @@ async def cmd_adopt(message: Message) -> None:
     "sleep_day": datetime.utcnow().date().isoformat(),
     "slept_today_hours": 10.0,
     "sleep_until": None,
+    "last_wake_at": stamp,
   }
   await create_cat(cat)
   await message.answer(f"🐾 تم تبني {name}!\nالسلالة: {cat['breed']}\nرقمها: #{cat['id_number']}\nاستخدم /status لمشاهدتها.")

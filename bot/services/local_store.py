@@ -43,13 +43,14 @@ def is_sleeping(cat: dict) -> bool:
 
 
 def sleep_need_percent(cat: dict) -> int:
+    """Return rest/readiness: 100 is rested, 65 starts sleep requests."""
     if is_sleeping(cat):
         return 100
-    if cat.get("sleep_day") != datetime.utcnow().date().isoformat():
-        slept = 0.0
-    else:
-        slept = float(cat.get("slept_today_hours", 0))
-    return max(0, min(100, round((10.0 - slept) * 10)))
+    last_wake = cat.get("last_wake_at")
+    if not last_wake:
+        return 100
+    active_hours = max(0, (datetime.utcnow() - parse_time(last_wake)).total_seconds() / 3600)
+    return max(0, min(100, round(100 - active_hours * 5)))
 
 
 def wake_if_ready(cat: dict) -> bool:
@@ -83,6 +84,7 @@ def finish_sleep(cat: dict) -> bool:
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["last_wake_at"] = datetime.utcnow().isoformat()
     return True
 
 
@@ -98,6 +100,7 @@ def wake_now(cat: dict) -> bool:
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["last_wake_at"] = datetime.utcnow().isoformat()
     return True
 
 

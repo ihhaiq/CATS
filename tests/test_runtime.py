@@ -21,7 +21,7 @@ class RuntimeTests(unittest.TestCase):
         }
         card = build_rich_card(cat, 42)
         self.assertIn("الشبع", card.html)
-        self.assertIn("الحاجة للنوم", card.html)
+        self.assertIn("الراحة والنوم", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
 

@@ -94,6 +94,7 @@ async def guest_message(message: Message) -> None:
                 "sleep_day": datetime.utcnow().date().isoformat(),
                 "slept_today_hours": 10.0,
                 "sleep_until": None,
+                "last_wake_at": stamp,
             }
             await create_cat(cat)
             text = (

@@ -12,6 +12,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from datetime import datetime
+import random
 
 from bot.config import settings
 from bot.services.economy import check_cooldown
@@ -44,9 +45,21 @@ async def _care(message: Message, action: str) -> None:
     return
 
   apply_decay(cat)
-  if is_sleeping(cat) or sleep_need_percent(cat) >= 85:
+  refusal_until = cat.get("action_refusal_until")
+  if is_sleeping(cat):
     await update_cat(cat)
     await message.answer("😾 القطة تحتاج النوم الآن وترفض هذا الفعل.")
+    return
+  if refusal_until and datetime.utcnow().timestamp() < refusal_until:
+    await update_cat(cat)
+    await message.answer("😾 القطة ستقبل بعد دقائق قليلة.")
+    return
+  if refusal_until:
+    cat.pop("action_refusal_until", None)
+  elif sleep_need_percent(cat) <= 65:
+    cat["action_refusal_until"] = datetime.utcnow().timestamp() + random.randint(120, 300)
+    await update_cat(cat)
+    await message.answer("😾 القطة تريد النوم الآن، جرّب بعد دقائق.")
     return
   timestamp_key = {"feed": "last_fed", "play": "last_played", "walk": "last_walk"}[action]
   cooldown = {"feed": settings.feed_cooldown, "play": settings.play_cooldown, "walk": settings.walk_cooldown}[action]
