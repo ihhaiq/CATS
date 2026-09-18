@@ -1,16 +1,14 @@
 """
-Composites: breed base asset + emotion state + collar overlay with the cat's
-name/id, correctly shaped for Arabic text.
-TODO (AGENT.md step 10):
-  - emotion_bucket(cat) -> "happy" | "neutral" | "sad": derive from hunger/happiness
-    thresholds (mirror the ones in decay_engine / notification thresholds).
-  - render_cat(cat) -> bytes (PNG):
-      1. base = Image.open(f"assets/cats/{cat.breed}/{emotion_bucket}.png")
-      2. draw collar text using shape_arabic(f"{cat.name} | #{cat.id_number}")
-      3. cache by (breed, emotion_bucket, cat.title) — recompute only when one of
-         those actually changes since the last render (store a cache key on the
-         cat row or in Redis, per the caching note in the system prompt).
-  - Asset folders must exist per breed: assets/cats/{breed}/{happy,neutral,sad}.png
+Procedural cat renderer used as a fallback while the official asset library is
+incomplete.
+
+Official Catibot assets live under:
+    bot/assets/cats/<breed>/<age_stage>/<state>.png
+
+Age stage is derived from age_days by bot.services.cat_assets.get_age_stage().
+Any future file-backed renderer must use the centralized breed/age/state
+vocabulary and fallback rules from bot.services.cat_assets rather than assuming
+breed alone is enough to identify an image.
 """
 from io import BytesIO
 
