@@ -23,20 +23,25 @@ class Settings:
     sleep_media_file_id: str = os.getenv("SLEEP_MEDIA_FILE_ID", "")
     cat_angry_sleep_media_file_id: str = os.getenv("CAT_ANGRY_SLEEP_MEDIA_FILE_ID", "")
     webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")  # e.g. https://catibot.up.railway.app
-    webhook_path: str = "/webhook"
+    webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook")
     port: int = int(os.getenv("PORT", "8080"))
     admin_ids: list[int] = None
 
     # Cooldowns (seconds)
-    feed_cooldown: int = 15 * 60
-    play_cooldown: int = 15 * 60
-    walk_cooldown: int = 4 * 60 * 60
+    feed_cooldown: int = int(os.getenv("FEED_COOLDOWN_SECONDS", str(15 * 60)))
+    play_cooldown: int = int(os.getenv("PLAY_COOLDOWN_SECONDS", str(15 * 60)))
+    walk_cooldown: int = int(os.getenv("WALK_COOLDOWN_SECONDS", str(4 * 60 * 60)))
+    talk_cooldown: int = int(os.getenv("TALK_COOLDOWN_SECONDS", str(5 * 60)))
+
+    # Sleep need: by default the visible meter drops 1 point every 5 minutes awake.
+    sleep_need_drop_interval_minutes: int = int(os.getenv("SLEEP_NEED_DROP_INTERVAL_MINUTES", "5"))
+    sleep_need_drop_per_interval: int = int(os.getenv("SLEEP_NEED_DROP_PER_INTERVAL", "1"))
 
     # Notification thresholds
     hunger_alert_threshold: int = 70
     happiness_alert_threshold: int = 30
     notification_min_gap: int = 6 * 60 * 60  # don't re-alert same state within 6h
-    notification_interval_minutes: int = 15
+    notification_interval_minutes: int = int(os.getenv("NOTIFICATION_INTERVAL_MINUTES", "15"))
 
 
 settings = Settings()
