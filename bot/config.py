@@ -36,7 +36,6 @@ class Settings:
     # Sleep need: by default the visible meter drops 1 point every 5 minutes awake.
     sleep_need_drop_interval_minutes: int = int(os.getenv("SLEEP_NEED_DROP_INTERVAL_MINUTES", "5"))
     sleep_need_drop_per_interval: int = int(os.getenv("SLEEP_NEED_DROP_PER_INTERVAL", "1"))
-    sleep_recovery_per_hour: int = int(os.getenv("SLEEP_RECOVERY_PER_HOUR", "30"))
 
     # Notification thresholds
     hunger_alert_threshold: int = 70
