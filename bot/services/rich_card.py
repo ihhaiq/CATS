@@ -28,6 +28,23 @@ def _media_block(kind: str, breed: str) -> tuple[str, InputRichMessageMedia] | N
     return "photo", InputRichMessageMedia(id="cat_photo", media=media)
 
 
+def build_adoption_card(cat: dict) -> InputRichMessage:
+    """Compact adoption confirmation that can turn into the full status card."""
+    name = escape(str(cat["name"]))
+    breed = escape(str(cat["breed"]))
+    id_number = escape(str(cat["id_number"]))
+    owner_id = int(cat["owner_id"])
+    html = f"""
+<p>🐾 تم تبني <b>{name}</b>!</p>
+<p>السلالة: {breed}</p>
+<p>رقمها: #{id_number}</p>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="primary" data="cat:{owner_id}:status">عرض الحالة</tg-button>
+</tg-button-row>
+""".strip()
+    return InputRichMessage(html=html, is_rtl=True)
+
+
 def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> InputRichMessage:
     media = _media_block(media_kind, cat["breed"])
     media_markup = ""
