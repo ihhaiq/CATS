@@ -1,5 +1,7 @@
 """Guest Mode replies for messages that summon the bot by username."""
+import logging
 import random
+import re
 from datetime import datetime
 
 from aiogram import Router
@@ -14,26 +16,74 @@ from bot.services.shop import list_items, open_shop
 from bot.services.shop_card import build_shop_card
 
 router = Router(name="guest")
+logger = logging.getLogger("catibot.guest")
 
 _ALIASES = {
     "status": "status",
     "cat": "status",
+    "state": "status",
     "حالة": "status",
+    "الحالة": "status",
     "قطتي": "status",
+
     "feed": "feed",
+    "food": "feed",
+    "eat": "feed",
     "اطعام": "feed",
-    "إطعام": "feed",
+    "طعام": "feed",
+    "اكل": "feed",
+    "أكل": "feed",
+
     "play": "play",
     "لعب": "play",
+
     "walk": "walk",
     "نزهة": "walk",
     "نزه": "walk",
+    "تمشية": "walk",
+
+    "talk": "talk",
+    "chat": "talk",
+    "تحدث": "talk",
+    "احجي": "talk",
+
+    "sleep": "sleep",
+    "نوم": "sleep",
+    "نام": "sleep",
+
+    "wake": "wake",
+    "ايقاظ": "wake",
+    "إيقاظ": "wake",
+    "صحّي": "wake",
+    "صحي": "wake",
+
     "adopt": "adopt",
     "تبني": "adopt",
     "تبنّي": "adopt",
+
     "shop": "shop",
+    "store": "shop",
     "متجر": "shop",
+
+    "help": "help",
+    "guide": "help",
+    "دليل": "help",
+    "مساعدة": "help",
 }
+
+_GUEST_HELP = (
+    "🐾 أوامر Catibot في وضع الضيف:\n"
+    "حالة / status\n"
+    "إطعام / feed\n"
+    "لعب / play\n"
+    "نزهة / walk\n"
+    "تحدث / talk\n"
+    "نوم / sleep\n"
+    "إيقاظ / wake\n"
+    "متجر / shop\n"
+    "تبني اسم / adopt name"
+)
+
 
 
 def _state_text(cat: dict) -> str:
@@ -46,28 +96,84 @@ def _state_text(cat: dict) -> str:
     )
 
 
+def _normalize_command(value: str) -> str:
+    value = value.casefold().strip()
+    value = value.replace("ـ", "")
+    value = re.sub(r"[\u064b-\u065f\u0670]", "", value)
+    value = value.strip("!?؟.,،:;؛()[]{}<>«»'\"")
+    return value
+
+
 def _requested_command(message: Message) -> tuple[str | None, str]:
-    text = (message.text or "").strip()
-    words = text.split()
-    if not words:
+    text = (message.text or message.caption or "").strip()
+    if not text:
         return None, ""
-    words = words[1:] if words[0].startswith("@") else words
+
+    # Guest invocation may include the @bot mention in the text. Remove mention
+    # tokens wherever Telegram leaves them, then parse the actual command.
+    words = [
+        word
+        for word in text.split()
+        if not word.startswith("@")
+    ]
     if not words:
-        return None, ""
-    command = words[0].lstrip("/").split("@", 1)[0].casefold()
-    return _ALIASES.get(command), " ".join(words[1:]).strip()
+        return "help", ""
+
+    command = _normalize_command(
+        words[0].lstrip("/").split("@", 1)[0]
+    )
+    argument = " ".join(words[1:]).strip()
+    return _ALIASES.get(command), argument
+
 
 
 @router.guest_message()
 async def guest_message(message: Message) -> None:
-    if not message.guest_query_id or not message.from_user:
+    if not message.guest_query_id:
+        logger.warning("Guest update without guest_query_id: %r", message.text)
+        return
+
+    caller = message.from_user or message.guest_bot_caller_user
+    if caller is None:
+        logger.warning(
+            "Guest query has no caller user: chat_id=%s text=%r",
+            message.chat.id,
+            message.text,
+        )
         return
 
     action, argument = _requested_command(message)
+    logger.info(
+        "Guest query user_id=%s text=%r action=%r",
+        caller.id,
+        message.text or message.caption,
+        action,
+    )
     if action is None:
+        result = InlineQueryResultArticle(
+            id="guest-help-unknown",
+            title="دليل Catibot",
+            description="الأمر غير معروف — افتح قائمة الأوامر",
+            input_message_content=InputTextMessageContent(
+                message_text=_GUEST_HELP
+            ),
+        )
+        await message.bot.answer_guest_query(message.guest_query_id, result)
+        return
+
+    if action == "help":
+        result = InlineQueryResultArticle(
+            id="guest-help",
+            title="دليل Catibot",
+            description="الأوامر العربية والإنكليزية",
+            input_message_content=InputTextMessageContent(
+                message_text=_GUEST_HELP
+            ),
+        )
+        await message.bot.answer_guest_query(message.guest_query_id, result)
         return
     if action == "shop":
-        user_id = message.from_user.id
+        user_id = caller.id
         items = await open_shop(user_id)
         result = InlineQueryResultArticle(
             id="guest-shop",
@@ -80,7 +186,7 @@ async def guest_message(message: Message) -> None:
         await message.bot.answer_guest_query(message.guest_query_id, result)
         return
     if action == "adopt":
-        user_id = message.from_user.id
+        user_id = caller.id
         await ensure_user(user_id)
         if await get_user_cat(user_id):
             text = "🐾 عندك قطة بالفعل. استخدم @RichsCatBot حالة لمشاهدة حالتها."
@@ -123,7 +229,7 @@ async def guest_message(message: Message) -> None:
             )
             title = "تم التبني"
     elif action != "adopt":
-        user_id = message.from_user.id
+        user_id = caller.id
         await ensure_user(user_id)
         cat = await get_user_cat(user_id)
         if cat is None:
@@ -176,6 +282,36 @@ async def guest_message(message: Message) -> None:
                     id="guest-walk",
                     title="معاينة النزهة",
                     description=f"{cat['name']} بعد النزهة",
+                    input_message_content=InputRichMessageContent(rich_message=card),
+                )
+                await message.bot.answer_guest_query(message.guest_query_id, result)
+                return
+            elif action == "talk":
+                card = build_rich_card(cat, await get_user_points(user_id), "talk")
+                result = InlineQueryResultArticle(
+                    id="guest-talk",
+                    title="التحدث مع القطة",
+                    description=cat["name"],
+                    input_message_content=InputRichMessageContent(rich_message=card),
+                )
+                await message.bot.answer_guest_query(message.guest_query_id, result)
+                return
+            elif action == "sleep":
+                card = build_rich_card(cat, await get_user_points(user_id), "sleep")
+                result = InlineQueryResultArticle(
+                    id="guest-sleep",
+                    title="نوم القطة",
+                    description=cat["name"],
+                    input_message_content=InputRichMessageContent(rich_message=card),
+                )
+                await message.bot.answer_guest_query(message.guest_query_id, result)
+                return
+            elif action == "wake":
+                card = build_rich_card(cat, await get_user_points(user_id), "status")
+                result = InlineQueryResultArticle(
+                    id="guest-wake",
+                    title="إيقاظ القطة",
+                    description=cat["name"],
                     input_message_content=InputRichMessageContent(rich_message=card),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
