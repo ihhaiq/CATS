@@ -32,7 +32,7 @@ router = Router(name="rich_actions")
 logger = logging.getLogger("catibot.rich_actions")
 
 _NOTICE_SECONDS = 10
-_ACTIONS = {"feed", "play", "walk", "talk", "sleep", "wake"}
+_ACTIONS = {"status", "feed", "play", "walk", "talk", "sleep", "wake"}
 
 
 async def _edit_card(query: CallbackQuery, card) -> bool:
@@ -119,6 +119,14 @@ async def _handle_rich_action(query: CallbackQuery, user_id: int, action: str) -
     refresh_cat_state(cat)
     # Persist the refreshed clocks/decay even if this action exits on a cooldown.
     await update_cat(cat)
+
+    if action == "status":
+        await _edit_card(
+            query,
+            build_rich_card(cat, await get_user_points(user_id), _default_media_kind(cat)),
+        )
+        await query.answer()
+        return
 
     sleeping = is_sleeping(cat)
     if sleeping and action != "wake":
