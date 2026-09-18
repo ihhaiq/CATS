@@ -1,6 +1,5 @@
 """
 Central configuration, loaded from environment variables (.env).
-TODO (see AGENT.md step 1): validate required vars raise clear errors on boot.
 """
 import os
 from dataclasses import dataclass
@@ -22,8 +21,8 @@ class Settings:
     talk_media_file_id: str = os.getenv("TALK_MEDIA_FILE_ID", "")
     sleep_media_file_id: str = os.getenv("SLEEP_MEDIA_FILE_ID", "")
     cat_angry_sleep_media_file_id: str = os.getenv("CAT_ANGRY_SLEEP_MEDIA_FILE_ID", "")
-    webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")  # e.g. https://catibot.up.railway.app
-    webhook_path: str = "/webhook"
+    webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")
+    webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook")
     port: int = int(os.getenv("PORT", "8080"))
     admin_ids: list[int] = None
 
@@ -32,11 +31,17 @@ class Settings:
     play_cooldown: int = 15 * 60
     walk_cooldown: int = 4 * 60 * 60
 
+    # Rest/sleep: while awake the visible rest meter drops in discrete steps.
+    sleep_decay_interval_minutes: int = max(1, int(os.getenv("SLEEP_DECAY_INTERVAL_MINUTES", "5")))
+    sleep_decay_amount: int = max(1, int(os.getenv("SLEEP_DECAY_AMOUNT", "1")))
+
     # Notification thresholds
     hunger_alert_threshold: int = 70
     happiness_alert_threshold: int = 30
-    notification_min_gap: int = 6 * 60 * 60  # don't re-alert same state within 6h
-    notification_interval_minutes: int = 15
+    notification_min_gap: int = 6 * 60 * 60
+    notification_interval_minutes: int = max(
+        1, int(os.getenv("NOTIFICATION_INTERVAL_MINUTES", "15"))
+    )
 
 
 settings = Settings()
