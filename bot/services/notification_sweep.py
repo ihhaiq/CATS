@@ -15,6 +15,7 @@ from bot.config import settings
 from bot.services.action_locks import user_action_lock
 from bot.services.local_store import (
     get_active_cats,
+    get_user_cat,
     is_sleeping,
     refresh_cat_state,
     update_cat,
@@ -25,8 +26,15 @@ _scheduler: Any = None
 _fallback_task: asyncio.Task | None = None
 
 
-async def _process_cat(bot: Bot, cat: dict) -> None:
-    async with user_action_lock(cat["owner_id"]):
+async def _process_cat(bot: Bot, snapshot: dict) -> None:
+    owner_id = snapshot["owner_id"]
+    async with user_action_lock(owner_id):
+        # get_active_cats() returns snapshots. Reload after waiting for the lock
+        # so a user action that happened in between cannot be overwritten.
+        cat = await get_user_cat(owner_id)
+        if cat is None or cat.get("cat_id") != snapshot.get("cat_id"):
+            return
+
         woke = refresh_cat_state(cat)
         if woke:
             cat["last_notified_state"] = None
