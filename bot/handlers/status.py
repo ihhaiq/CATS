@@ -25,6 +25,7 @@ async def cmd_status(message: Message) -> None:
   if cat is None:
     await message.answer("ما عندك قطة. استخدم /adopt اسم_القطة أولاً.")
     return
+  finish_sleep(cat)
   apply_decay(cat)
   if cat["love_bar"] <= 0:
     cat["is_fled"] = True
