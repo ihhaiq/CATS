@@ -32,6 +32,17 @@ router = Router(name="rich_actions")
 logger = logging.getLogger("catibot.rich_actions")
 
 
+async def _build_card(query: CallbackQuery, cat: dict, points: int, state: str = "status"):
+    upload_chat_id = query.message.chat.id if query.message else query.from_user.id
+    return await build_rich_card(
+        query.bot,
+        cat,
+        points,
+        state,
+        upload_chat_id=upload_chat_id,
+    )
+
+
 def _set_action_notice(cat: dict, text: str) -> str:
     token = secrets.token_hex(8)
     cat["action_notice"] = text
@@ -82,7 +93,7 @@ async def _clear_notice_later(
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(cat, await get_user_points(user_id), "status"),
+            await _build_card(query, cat, await get_user_points(user_id), "status"),
         )
     except asyncio.CancelledError:
         raise
@@ -122,7 +133,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(cat, await get_user_points(user_id), "status"),
+            await _build_card(query, cat, await get_user_points(user_id), "status"),
         )
         await query.answer()
         return
@@ -138,7 +149,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(
+            await _build_card(query, 
                 cat,
                 await get_user_points(user_id),
                 "cat_angry_sleep",
@@ -154,7 +165,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(
+            await _build_card(query, 
                 cat,
                 await get_user_points(user_id),
                 "cat_angry_sleep",
@@ -177,7 +188,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(
+            await _build_card(query, 
                 cat,
                 await get_user_points(user_id),
                 "cat_angry_sleep",
@@ -203,7 +214,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await update_cat(cat)
         await _edit_card(
             query,
-            build_rich_card(
+            await _build_card(query, 
                 cat,
                 await get_user_points(user_id),
                 "cat_angry_sleep",
@@ -274,7 +285,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             await update_cat(cat)
             await _edit_card(
                 query,
-                build_rich_card(
+                await _build_card(query, 
                     cat,
                     await get_user_points(user_id),
                     media_kind,
@@ -293,7 +304,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             await update_cat(cat)
             await _edit_card(
                 query,
-                build_rich_card(
+                await _build_card(query, 
                     cat,
                     await get_user_points(user_id),
                     media_kind,
@@ -327,7 +338,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         balance = await award_points(user_id, points, action)
 
     await update_cat(cat)
-    await _edit_card(query, build_rich_card(cat, balance, media_kind))
+    await _edit_card(query, await _build_card(query, cat, balance, media_kind))
     await query.answer()
 
     if notice_token:

@@ -86,6 +86,16 @@ _GUEST_HELP = (
 
 
 
+async def _build_guest_card(message: Message, caller, cat: dict, points: int, state: str = "status"):
+    return await build_rich_card(
+        message.bot,
+        cat,
+        points,
+        state,
+        upload_chat_id=caller.id,
+    )
+
+
 def _state_text(cat: dict) -> str:
     return (
         f"🐾 {cat['name']}\n"
@@ -245,7 +255,13 @@ async def guest_message(message: Message) -> None:
                     title="حالة القطة",
                     description=f"{cat['name']} | الجوع {cat['hunger']}% | السعادة {cat['happiness']}%",
                     input_message_content=InputRichMessageContent(
-                        rich_message=build_rich_card(cat, await get_user_points(user_id)),
+                        rich_message=await _build_guest_card(
+                            message,
+                            caller,
+                            cat,
+                            await get_user_points(user_id),
+                            "status",
+                        ),
                     ),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
@@ -253,7 +269,7 @@ async def guest_message(message: Message) -> None:
             if action == "feed":
                 preview = dict(cat)
                 preview["hunger"] = max(0, preview["hunger"] - 30)
-                card = build_rich_card(preview, await get_user_points(user_id), "feed")
+                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "feed")
                 result = InlineQueryResultArticle(
                     id="guest-feed",
                     title="معاينة الإطعام",
@@ -265,7 +281,7 @@ async def guest_message(message: Message) -> None:
             elif action == "play":
                 preview = dict(cat)
                 preview["happiness"] = min(100, preview["happiness"] + 25)
-                card = build_rich_card(preview, await get_user_points(user_id), "play")
+                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "play")
                 result = InlineQueryResultArticle(
                     id="guest-play",
                     title="معاينة اللعب",
@@ -277,7 +293,7 @@ async def guest_message(message: Message) -> None:
             elif action == "walk":
                 preview = dict(cat)
                 preview["happiness"] = min(100, preview["happiness"] + 15)
-                card = build_rich_card(preview, await get_user_points(user_id), "walk")
+                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "walk")
                 result = InlineQueryResultArticle(
                     id="guest-walk",
                     title="معاينة النزهة",
@@ -287,7 +303,7 @@ async def guest_message(message: Message) -> None:
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
             elif action == "talk":
-                card = build_rich_card(cat, await get_user_points(user_id), "talk")
+                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "talk")
                 result = InlineQueryResultArticle(
                     id="guest-talk",
                     title="التحدث مع القطة",
@@ -297,7 +313,7 @@ async def guest_message(message: Message) -> None:
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
             elif action == "sleep":
-                card = build_rich_card(cat, await get_user_points(user_id), "sleep")
+                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "sleep")
                 result = InlineQueryResultArticle(
                     id="guest-sleep",
                     title="نوم القطة",
@@ -307,7 +323,7 @@ async def guest_message(message: Message) -> None:
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
             elif action == "wake":
-                card = build_rich_card(cat, await get_user_points(user_id), "status")
+                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "status")
                 result = InlineQueryResultArticle(
                     id="guest-wake",
                     title="إيقاظ القطة",

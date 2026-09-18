@@ -31,6 +31,8 @@ def _read() -> dict:
         "points_log": [],
         "media": {},
         "media_types": {},
+        "media_cache": {},
+        "media_overrides": {},
     }.items():
         data.setdefault(key, default)
     return data
@@ -299,4 +301,72 @@ async def set_media_file(
             key = kind
         data.setdefault("media", {})[key] = file_id
         data.setdefault("media_types", {})[key] = media_type
+        _write(data)
+
+
+
+async def get_media_cache_entry(cache_key: str) -> dict | None:
+    """Return cached Telegram metadata for one local asset."""
+    async with _lock:
+        entry = _read().get("media_cache", {}).get(cache_key)
+        return dict(entry) if isinstance(entry, dict) else None
+
+
+async def set_media_cache_entry(
+    cache_key: str,
+    *,
+    file_id: str,
+    file_hash: str,
+    media_type: str,
+    path: str,
+) -> None:
+    """Persist metadata only; asset bytes stay on the filesystem."""
+    async with _lock:
+        data = _read()
+        data.setdefault("media_cache", {})[cache_key] = {
+            "file_id": file_id,
+            "file_hash": file_hash,
+            "media_type": media_type,
+            "path": path,
+            "updated_at": now_iso(),
+        }
+        _write(data)
+
+
+async def get_media_override(
+    kind: str,
+    breed: str,
+    age_stage: str,
+) -> dict | None:
+    """Return only an exact explicit /dev override for this asset identity."""
+    async with _lock:
+        overrides = _read().get("media_overrides", {})
+        state = normalize_cat_state(kind)
+        key = f"{breed}:{age_stage}:{state}"
+        value = overrides.get(key)
+        if isinstance(value, dict) and value.get("file_id"):
+            result = dict(value)
+            result["key"] = key
+            return result
+        return None
+
+
+async def set_media_override(
+    kind: str,
+    file_id: str,
+    media_type: str,
+    *,
+    breed: str,
+    age_stage: str,
+) -> None:
+    """Store an explicit admin override separately from automatic local cache."""
+    async with _lock:
+        data = _read()
+        state = normalize_cat_state(kind)
+        key = f"{breed}:{age_stage}:{state}"
+        data.setdefault("media_overrides", {})[key] = {
+            "file_id": file_id,
+            "media_type": media_type,
+            "updated_at": now_iso(),
+        }
         _write(data)

@@ -35,5 +35,11 @@ async def cmd_status(message: Message) -> None:
   await update_cat(cat)
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
-    rich_message=build_rich_card(cat, await get_user_points(user_id)),
+    rich_message=await build_rich_card(
+      message.bot,
+      cat,
+      await get_user_points(user_id),
+      "status",
+      upload_chat_id=message.chat.id,
+    ),
   )

@@ -21,6 +21,7 @@ class Settings:
     talk_media_file_id: str = os.getenv("TALK_MEDIA_FILE_ID", "")
     sleep_media_file_id: str = os.getenv("SLEEP_MEDIA_FILE_ID", "")
     cat_angry_sleep_media_file_id: str = os.getenv("CAT_ANGRY_SLEEP_MEDIA_FILE_ID", "")
+    media_cache_chat_id: int = int(os.getenv("MEDIA_CACHE_CHAT_ID", "0") or 0)
     webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")
     webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook")
     port: int = int(os.getenv("PORT", "8080"))

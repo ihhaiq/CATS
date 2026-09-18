@@ -68,22 +68,50 @@ Use lowercase snake_case names only. Keep the vocabulary centralized in
 `bot/services/cat_assets.py`; do not create duplicate state/age/breed arrays
 inside handlers.
 
-### Lookup and fallback
+### Runtime source of truth, lookup and cache
 
-Resolve media in this order:
+Official files under `bot/assets/cats/` are the primary source of truth.
+Do not require an administrator to upload official art manually after deploy.
 
-1. requested `breed + age_stage + state`
-2. same `breed + adult + state`
-3. legacy `breed + state`
-4. generic `state`
+Runtime resolution is:
 
-Legacy JSON data is not migrated destructively. Keys such as `siamese:sleep`
-must continue to work.
+1. explicit admin override, if intentionally configured
+2. local requested `breed + age_stage + visual_state`
+3. local `breed + adult + visual_state`
+4. legacy-compatible local path
+5. legacy/generic Telegram `file_id`
+
+Because Telegram Rich Messages use reusable Telegram media identifiers, local
+files are lazily uploaded on first request. Persist only metadata
+(`file_id`, SHA-256, media type, path), never image bytes/base64. A hash
+mismatch invalidates the cache and triggers a fresh upload.
+
+Use per-asset async synchronization so concurrent requests in one process do
+not upload the same file twice. Do not pre-upload all 240 assets at startup.
+Multi-instance deployments can still race across processes unless they share a
+stronger external lock/cache; duplicate uploads in that topology are harmless.
+
+Legacy JSON data is not migrated destructively. Keys such as
+`siamese:sleep`, `siamese:status`, and generic state entries must continue
+to work.
 
 Compatibility aliases:
 
 - `status -> idle`
 - `cat_angry_sleep -> angry`
+
+Visual-state precedence is centralized in
+`resolve_cat_visual_state(cat, requested_state)`:
+
+1. explicit action state
+2. sleeping -> `sleep`
+3. active refusal -> `angry`
+4. sick flag -> `sick`
+5. hunger threshold -> `hungry`
+6. otherwise -> `idle`
+
+This dynamic precedence applies to status/idle views; explicit states such as
+feed/play/walk/talk/sleep/angry remain explicit.
 
 When an alias is used, canonical age-aware keys are preferred, then legacy
 original keys are checked so old deployments remain valid.

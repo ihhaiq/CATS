@@ -6,47 +6,38 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
-from bot.config import settings
-from bot.services.cat_assets import get_age_stage
-from bot.services.local_store import get_media_file_id_sync, get_media_type_sync
 from bot.services.local_store import is_sleeping, sleep_need_percent
+from bot.services.media_runtime import resolve_cat_media
 
 
-def _media_id(kind: str, breed: str, age_stage: str) -> str:
-    return (
-        get_media_file_id_sync(kind, breed, age_stage)
-        or getattr(settings, f"{kind}_media_file_id", "")
-        or ""
+async def build_rich_card(
+    bot,
+    cat: dict,
+    points: int,
+    media_kind: str = "status",
+    *,
+    upload_chat_id: int | str | None = None,
+) -> InputRichMessage:
+    resolved = await resolve_cat_media(
+        bot,
+        cat,
+        media_kind,
+        upload_chat_id=upload_chat_id,
     )
 
-
-def _media_block(
-    kind: str,
-    breed: str,
-    age_stage: str,
-) -> tuple[str, InputRichMessageMedia] | None:
-    file_id = _media_id(kind, breed, age_stage)
-    if not file_id:
-        return None
-    media_type = get_media_type_sync(kind, breed, age_stage)
-    if media_type == "video" or kind.endswith("_gif") or kind.endswith("_animation"):
-        media = InputMediaVideo(media=file_id, duration=5)
-        return "video", InputRichMessageMedia(id="cat_video", media=media)
-    media = InputMediaPhoto(media=file_id)
-    return "photo", InputRichMessageMedia(id="cat_photo", media=media)
-
-
-def build_rich_card(cat: dict, points: int, media_kind: str = "status") -> InputRichMessage:
-    age_stage = get_age_stage(cat.get("age_days", 30))
-    media = _media_block(media_kind, cat["breed"], age_stage)
     media_markup = ""
     media_list = []
-    if media:
-        block_type, media_item = media
-        media_list.append(media_item)
-        tag = "img" if block_type == "photo" else "video"
-        protocol = "photo" if block_type == "photo" else "video"
-        media_markup = f"<{tag} src=\"tg://{protocol}?id={media_item.id}\"/>"
+    if resolved:
+        if resolved.media_type == "video":
+            media = InputMediaVideo(media=resolved.file_id, duration=5)
+            media_item = InputRichMessageMedia(id="cat_video", media=media)
+            media_list.append(media_item)
+            media_markup = '<video src="tg://video?id=cat_video"/>'
+        else:
+            media = InputMediaPhoto(media=resolved.file_id)
+            media_item = InputRichMessageMedia(id="cat_photo", media=media)
+            media_list.append(media_item)
+            media_markup = '<img src="tg://photo?id=cat_photo"/>'
     else:
         media_markup = "<p>الصورة الواقعية ستظهر بعد إضافة ملف القطة.</p>"
 
