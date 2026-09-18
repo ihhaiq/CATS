@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InputRichMessage, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputRichMessage, Message
 
 from bot.services.economy import assign_random_breed
 from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
@@ -18,16 +18,16 @@ class AdoptFlow(StatesGroup):
   waiting_name = State()
 
 
-def _welcome_card() -> InputRichMessage:
-  return InputRichMessage(
-    html="""
-<h2>🐾 أهلاً بك في Catibot!</h2>
-<p>ابدأ بتبنّي قطتك الأولى.</p>
-<tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="adopt:start">تبنّي قطة</tg-button>
-</tg-button-row>
-""".strip(),
-    is_rtl=True,
+def _welcome_keyboard() -> InlineKeyboardMarkup:
+  return InlineKeyboardMarkup(
+    inline_keyboard=[
+      [
+        InlineKeyboardButton(
+          text="🐾 تبنّي قطة",
+          callback_data="adopt:start",
+        )
+      ]
+    ]
   )
 
 
@@ -90,9 +90,13 @@ async def cmd_start(message: Message) -> None:
       rich_message=_adopted_card(cat),
     )
     return
-  await message.bot.send_rich_message(
-    chat_id=message.chat.id,
-    rich_message=_welcome_card(),
+  await message.answer(
+    "🐾 <b>أهلاً بك في Catibot</b>\n\n"
+    "هنا راح تتبنّى قطتك الخاصة وتعتني بيها يوم بعد يوم. "
+    "تحتاج تطعمها، تلعب وياها، تطلعها بنزهة وتخليها ترتاح وتنام بوقتها.\n\n"
+    "كل فعل يأثر على حالتها، سعادتها وحبها إلك، فحاول لا تهملها 😼\n\n"
+    "ابدأ من الزر أدناه واختار اسم قطتك.",
+    reply_markup=_welcome_keyboard(),
   )
 
 
