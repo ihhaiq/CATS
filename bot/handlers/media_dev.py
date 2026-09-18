@@ -1,4 +1,6 @@
 """Admin media uploader for age-aware Rich Message cat assets."""
+from datetime import datetime, timedelta
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -11,6 +13,7 @@ from bot.services.cat_assets import (
     inspect_cat_asset_library,
 )
 from bot.services.local_store import set_media_override
+from bot.services.media_runtime import resolve_cat_media
 from bot.services.rich_card import build_rich_card
 
 router = Router(name="media_dev")
@@ -172,16 +175,36 @@ async def _send_media_test(message: Message) -> None:
         "last_wake_at": None,
     }
     cases = (
-        ("idle", "status"),
-        ("hungry", "hungry"),
-        ("sleep", "sleep"),
-        ("angry", "cat_angry_sleep"),
+        ("idle", "status", {}),
+        ("hungry", "status", {"hunger": 90}),
+        (
+            "sleep",
+            "status",
+            {
+                "sleep_until": (
+                    datetime.utcnow() + timedelta(hours=1)
+                ).isoformat()
+            },
+        ),
+        ("angry", "cat_angry_sleep", {}),
     )
-    for label, requested in cases:
-        await message.answer(f"🧪 {label}")
+    for label, requested, patch in cases:
+        test_cat = dict(sample)
+        test_cat.update(patch)
+        resolved = await resolve_cat_media(
+            message.bot,
+            test_cat,
+            requested,
+            upload_chat_id=message.chat.id,
+        )
+        source = resolved.source if resolved else "missing"
+        path = resolved.path if resolved and resolved.path else "-"
+        await message.answer(
+            f"🧪 {label}\nsource: {source}\npath: {path}"
+        )
         card = await build_rich_card(
             message.bot,
-            dict(sample),
+            test_cat,
             0,
             requested,
             upload_chat_id=message.chat.id,
@@ -204,6 +227,9 @@ async def dev_media_test(message: Message) -> None:
 async def dev_media_test_button(query: CallbackQuery) -> None:
     if not allowed(query.from_user.id):
         await query.answer("للأدمن فقط", show_alert=True)
+        return
+    if query.message is None:
+        await query.answer("لا توجد رسالة مرتبطة للاختبار.", show_alert=True)
         return
     await query.answer("جاري اختبار الصور…")
     await _send_media_test(query.message)
