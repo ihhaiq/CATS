@@ -1,9 +1,12 @@
 """Callbacks for Rich Message action buttons."""
-import random
 import asyncio
+import logging
+import random
+import secrets
 from datetime import datetime
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
 from bot.config import settings
@@ -11,38 +14,91 @@ from bot.services.economy import check_cooldown
 from bot.services.local_store import (
     apply_decay,
     award_points,
+    clear_action_notice,
     ensure_user,
+    finish_sleep,
     get_user_cat,
     get_user_points,
-    parse_time,
-    update_cat,
-    finish_sleep,
     is_sleeping,
-    start_sleep,
-    clear_action_notice,
-    wake_now,
+    parse_time,
     sleep_need_percent,
+    start_sleep,
+    update_cat,
+    wake_now,
 )
 from bot.services.rich_card import build_rich_card
 
 router = Router(name="rich_actions")
+logger = logging.getLogger("catibot.rich_actions")
 
 
-async def _edit_card(query: CallbackQuery, card) -> None:
-    if query.inline_message_id:
-        await query.bot.edit_message_text(inline_message_id=query.inline_message_id, rich_message=card)
-    elif query.message:
-        await query.bot.edit_message_text(
-            chat_id=query.message.chat.id,
-            message_id=query.message.message_id,
-            rich_message=card,
+def _set_action_notice(cat: dict, text: str) -> str:
+    token = secrets.token_hex(8)
+    cat["action_notice"] = text
+    cat["action_notice_token"] = token
+    return token
+
+
+async def _edit_card(query: CallbackQuery, card) -> bool:
+    """Edit a Rich Card and treat Telegram's no-op edit as success."""
+    try:
+        if query.inline_message_id:
+            await query.bot.edit_message_text(
+                inline_message_id=query.inline_message_id,
+                rich_message=card,
+            )
+            return True
+        if query.message:
+            await query.bot.edit_message_text(
+                chat_id=query.message.chat.id,
+                message_id=query.message.message_id,
+                rich_message=card,
+            )
+            return True
+        return False
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return False
+        raise
+
+
+async def _clear_notice_later(
+    query: CallbackQuery,
+    user_id: int,
+    notice_token: str,
+) -> None:
+    """Clear only the notice that scheduled this task.
+
+    A fresh cat snapshot is loaded after the delay so an older task cannot
+    overwrite newer state or clear a newer notice.
+    """
+    try:
+        await asyncio.sleep(10)
+        cat = await get_user_cat(user_id)
+        if cat is None or cat.get("action_notice_token") != notice_token:
+            return
+
+        clear_action_notice(cat)
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            build_rich_card(cat, await get_user_points(user_id), "status"),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(
+            "Failed to clear action notice safely for user_id=%s",
+            user_id,
         )
 
 
-async def _clear_notice_later(query: CallbackQuery, cat: dict, points: int) -> None:
-    await asyncio.sleep(10)
-    clear_action_notice(cat)
-    await _edit_card(query, build_rich_card(cat, points, "status"))
+def _schedule_notice_clear(
+    query: CallbackQuery,
+    user_id: int,
+    notice_token: str,
+) -> None:
+    asyncio.create_task(_clear_notice_later(query, user_id, notice_token))
 
 
 @router.callback_query(lambda query: query.data and query.data.startswith("cat:"))
@@ -55,117 +111,214 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await query.answer("ما عندك قطة بعد.", show_alert=True)
         return
 
+    # Any new action invalidates an older temporary notice/task.
     clear_action_notice(cat)
     apply_decay(cat)
     if finish_sleep(cat):
         await update_cat(cat)
+
     if is_sleeping(cat) and action != "wake":
         await update_cat(cat)
         await query.answer()
         return
+
     if action == "wake" and cat.get("wake_attempts", 0) == 0:
-        cat["action_notice"] = "😾 القطة ترفض النهوض!"
+        notice_token = _set_action_notice(cat, "😾 القطة ترفض النهوض!")
         cat["wake_attempts"] = 1
         await update_cat(cat)
-        await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
+        await _edit_card(
+            query,
+            build_rich_card(
+                cat,
+                await get_user_points(user_id),
+                "cat_angry_sleep",
+            ),
+        )
         await query.answer()
-        asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+        _schedule_notice_clear(query, user_id, notice_token)
         return
+
     if action == "wake" and random.random() < 0.35:
-        cat["action_notice"] = "😾 القطة ترفض النهوض!"
+        notice_token = _set_action_notice(cat, "😾 القطة ترفض النهوض!")
         cat["wake_attempts"] = cat.get("wake_attempts", 0) + 1
         await update_cat(cat)
-        await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
+        await _edit_card(
+            query,
+            build_rich_card(
+                cat,
+                await get_user_points(user_id),
+                "cat_angry_sleep",
+            ),
+        )
         await query.answer()
-        asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+        _schedule_notice_clear(query, user_id, notice_token)
         return
+
     refusal_until = cat.get("action_refusal_until")
-    if refusal_until and datetime.utcnow().timestamp() < refusal_until and action in {"feed", "play", "walk", "talk"}:
-        cat["action_notice"] = "😾 القطة ستقبل بعد دقائق قليلة!"
+    if (
+        refusal_until
+        and datetime.utcnow().timestamp() < refusal_until
+        and action in {"feed", "play", "walk", "talk"}
+    ):
+        notice_token = _set_action_notice(
+            cat,
+            "😾 القطة ستقبل بعد دقائق قليلة!",
+        )
         await update_cat(cat)
-        await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
+        await _edit_card(
+            query,
+            build_rich_card(
+                cat,
+                await get_user_points(user_id),
+                "cat_angry_sleep",
+            ),
+        )
         await query.answer()
-        asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+        _schedule_notice_clear(query, user_id, notice_token)
         return
+
     if refusal_until:
         cat.pop("action_refusal_until", None)
-    elif sleep_need_percent(cat) <= 65 and action in {"feed", "play", "walk", "talk"}:
-        cat["action_notice"] = "😾 القطة مرهقة وتحتاج النوم!"
-        cat["action_refusal_until"] = datetime.utcnow().timestamp() + random.randint(120, 300)
+    elif (
+        sleep_need_percent(cat) <= 65
+        and action in {"feed", "play", "walk", "talk"}
+    ):
+        notice_token = _set_action_notice(
+            cat,
+            "😾 القطة مرهقة وتحتاج النوم!",
+        )
+        cat["action_refusal_until"] = (
+            datetime.utcnow().timestamp() + random.randint(120, 300)
+        )
         await update_cat(cat)
-        await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), "cat_angry_sleep"))
+        await _edit_card(
+            query,
+            build_rich_card(
+                cat,
+                await get_user_points(user_id),
+                "cat_angry_sleep",
+            ),
+        )
         await query.answer()
-        asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+        _schedule_notice_clear(query, user_id, notice_token)
         return
+
     media_kind = action
+    notice_token: str | None = None
+
     if action == "feed":
-        ready, left = check_cooldown(parse_time(cat["last_fed"]), settings.feed_cooldown)
+        ready, left = check_cooldown(
+            parse_time(cat["last_fed"]),
+            settings.feed_cooldown,
+        )
         if not ready:
-            await query.answer(f"الإطعام متاح بعد {left // 60} دقيقة.", show_alert=True)
+            await query.answer(
+                f"الإطعام متاح بعد {left // 60} دقيقة.",
+                show_alert=True,
+            )
             return
         cat["hunger"] = max(0, cat["hunger"] - 30)
         cat["last_fed"] = datetime.utcnow().isoformat()
         points = random.choice([0, 0, 2, 5, 8])
+
     elif action in {"play", "walk"} and random.random() < 0.2:
         media_kind = "cat_angry_sleep"
         points = 0
-        cat["action_notice"] = "😾 القطة تريد النوم!"
-        cat["action_refusal_until"] = datetime.utcnow().timestamp() + random.randint(120, 300)
+        notice_token = _set_action_notice(cat, "😾 القطة تريد النوم!")
+        cat["action_refusal_until"] = (
+            datetime.utcnow().timestamp() + random.randint(120, 300)
+        )
+
     elif action == "play":
         cat["happiness"] = min(100, cat["happiness"] + 25)
         cat["hunger"] = min(100, cat["hunger"] + 5)
         cat["last_played"] = datetime.utcnow().isoformat()
         points = random.choice([0, 1, 3, 5, 10])
         if random.random() < 0.15:
-            cat["action_notice"] = "🥰 نامت القطة على صدرك!"
+            notice_token = _set_action_notice(
+                cat,
+                "🥰 نامت القطة على صدرك!",
+            )
+
     elif action == "walk":
         cat["happiness"] = min(100, cat["happiness"] + 15)
         cat["last_walk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 2, 5, 10, 15])
+
     elif action == "talk":
         cat["happiness"] = min(100, cat["happiness"] + 5)
         points = random.choice([0, 1, 2, 4])
         if random.random() < 0.15:
-            cat["action_notice"] = "🥰 نامت القطة على صدرك!"
+            notice_token = _set_action_notice(
+                cat,
+                "🥰 نامت القطة على صدرك!",
+            )
+
     elif action == "sleep":
         if cat["hunger"] > 70 or cat["happiness"] < 30:
-            cat["action_notice"] = "😾 القطة لا تستطيع النوم الآن، إنها تحتاج رعاية!"
+            notice_token = _set_action_notice(
+                cat,
+                "😾 القطة لا تستطيع النوم الآن، إنها تحتاج رعاية!",
+            )
             media_kind = "cat_angry_sleep"
-            points = 0
             await update_cat(cat)
-            await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), media_kind))
+            await _edit_card(
+                query,
+                build_rich_card(
+                    cat,
+                    await get_user_points(user_id),
+                    media_kind,
+                ),
+            )
             await query.answer()
-            asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+            _schedule_notice_clear(query, user_id, notice_token)
             return
+
         if random.random() < 0.25:
-            cat["action_notice"] = "😾 القطة رفضت النوم!"
+            notice_token = _set_action_notice(
+                cat,
+                "😾 القطة رفضت النوم!",
+            )
             media_kind = "cat_angry_sleep"
-            points = 0
             await update_cat(cat)
-            await _edit_card(query, build_rich_card(cat, await get_user_points(user_id), media_kind))
+            await _edit_card(
+                query,
+                build_rich_card(
+                    cat,
+                    await get_user_points(user_id),
+                    media_kind,
+                ),
+            )
             await query.answer()
-            asyncio.create_task(_clear_notice_later(query, cat, await get_user_points(user_id)))
+            _schedule_notice_clear(query, user_id, notice_token)
             return
-        minutes = start_sleep(cat)
+
+        start_sleep(cat)
         cat["wake_attempts"] = 0
         points = random.choice([0, 1, 2])
         media_kind = "sleep"
         if random.random() < 0.15:
-            cat["action_notice"] = "🥰 نامت القطة على صدرك!"
+            notice_token = _set_action_notice(
+                cat,
+                "🥰 نامت القطة على صدرك!",
+            )
+
     elif action == "wake":
         wake_now(cat)
         cat["wake_attempts"] = 0
         media_kind = "status"
         points = 0
+
     else:
         return
 
-    await update_cat(cat)
     balance = await get_user_points(user_id)
     if points:
         balance = await award_points(user_id, points, action)
+
     await update_cat(cat)
     await _edit_card(query, build_rich_card(cat, balance, media_kind))
     await query.answer()
-    if cat.get("action_notice"):
-        asyncio.create_task(_clear_notice_later(query, cat, balance))
+
+    if notice_token:
+        _schedule_notice_clear(query, user_id, notice_token)
