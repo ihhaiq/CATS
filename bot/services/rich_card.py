@@ -51,7 +51,10 @@ async def build_rich_card(
     sleeping = is_sleeping(cat)
     if sleeping:
         sleep_kind = cat.get("sleep_kind")
-        sleep_label = "نوم رئيسي" if sleep_kind == "main" else "قيلولة"
+        sleep_label = {
+            "main": "نوم رئيسي",
+            "nap": "قيلولة",
+        }.get(sleep_kind, "نوم")
         remaining = sleep_duration_text(sleep_remaining_minutes(cat))
         sleep_note = (
             f"<p>😴 القطة في {sleep_label}. "
