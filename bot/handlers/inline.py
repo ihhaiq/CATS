@@ -64,7 +64,10 @@ async def inline_cat(inline_query: InlineQuery) -> None:
         apply_decay(cat)
         finish_sleep(cat)
         await update_cat(cat)
-        if action in {"feed", "play", "walk"}:
+        if cat.get("is_fled"):
+            title = "💨 هربت قطتك"
+            text = "وصل الحب إلى 0 بسبب الإهمال، وما عادت أفعال العناية متاحة."
+        elif action in {"feed", "play", "walk"}:
             preview = dict(cat)
             apply_care_effects(preview, action)
             title = {
