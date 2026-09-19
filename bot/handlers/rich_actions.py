@@ -24,6 +24,7 @@ from bot.services.local_store import (
     get_user_points,
     is_sleeping,
     parse_time,
+    sleep_duration_text,
     sleep_need_percent,
     start_sleep,
     update_cat,
@@ -286,18 +287,19 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             _schedule_notice_clear(query, user_id, notice_token)
             return
 
-        start_sleep(cat)
+        planned_minutes = start_sleep(cat)
         points = 0
         media_kind = "sleep"
-        if rest_now <= 25:
+        duration = sleep_duration_text(planned_minutes)
+        if cat.get("sleep_kind") == "main":
             notice_token = _set_action_notice(
                 cat,
-                "😴 نامت بسرعة لأنها كانت منهكة.",
+                f"😴 دخلت نوم رئيسي، تقريباً {duration}.",
             )
-        elif random.random() < 0.15:
+        else:
             notice_token = _set_action_notice(
                 cat,
-                "💤 لفت نفسها ونامت بهدوء.",
+                f"💤 أخذت قيلولة، تقريباً {duration}.",
             )
 
     elif action == "wake":
