@@ -19,6 +19,7 @@ from bot.services.local_store import (
   parse_time,
   sleep_need_percent,
   update_cat,
+  user_action_lock,
 )
 
 router = Router(name="care")
@@ -46,6 +47,11 @@ async def cmd_talk(message: Message) -> None:
 
 async def _care(message: Message, action: str) -> None:
   user_id = message.from_user.id
+  async with user_action_lock(user_id):
+    await _care_locked(message, action, user_id)
+
+
+async def _care_locked(message: Message, action: str, user_id: int) -> None:
   await ensure_user(user_id)
   cat = await get_user_cat(user_id)
   if cat is None:
