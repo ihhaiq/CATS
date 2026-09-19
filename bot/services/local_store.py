@@ -399,6 +399,9 @@ def mark_fled_if_needed(cat: dict) -> bool:
 
 def apply_decay(cat: dict) -> None:
     """Advance needs in small time slices so neglect is never backdated."""
+    if cat.get("is_fled"):
+        return
+
     now = datetime.utcnow()
     last_decay = parse_time(
         cat.get("last_decay_at") or cat.get("created_at") or cat["last_fed"]
