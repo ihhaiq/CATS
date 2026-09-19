@@ -194,10 +194,7 @@ def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
 
     # A deeply tired cat takes a real main sleep. Otherwise it takes one of
     # several shorter naps, which is closer to a cat's normal daily rhythm.
-    if (
-        rest <= MAIN_SLEEP_REST_THRESHOLD
-        and slept < CAT_DAILY_SLEEP_TARGET_HOURS
-    ):
+    if rest <= MAIN_SLEEP_REST_THRESHOLD:
         kind = "main"
         hours = max(
             MAIN_SLEEP_MIN_HOURS,
