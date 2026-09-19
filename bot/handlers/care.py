@@ -12,7 +12,9 @@ from bot.services.local_store import (
   apply_decay,
   award_points,
   can_bypass_action_cooldown,
+  care_reward_points,
   ensure_user,
+  finish_sleep,
   fullness_percent,
   get_user_cat,
   get_user_points,
@@ -62,6 +64,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     return
 
   apply_decay(cat)
+  finish_sleep(cat)
   if is_sleeping(cat):
     await update_cat(cat)
     remaining = sleep_duration_text(sleep_remaining_minutes(cat))
@@ -116,26 +119,23 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   if action == "feed":
     text = "🍖 أكلت القطة وصارت أهدأ وأسعد"
-    points = 5
   elif action == "play":
     if int(cat.get("same_action_streak", 1)) >= 5:
       text = "😾 ملت من نفس اللعب؛ غيّر النشاط وياها"
-      points = 0
     else:
       text = "🎾 انبسطت القطة باللعب"
-      points = 5
   elif action == "walk":
     text = "🌿 طلعت القطة نزهة وانبسطت"
-    points = 10
   else:
     text = "💬 ارتاحت القطة للحچي وياك"
-    points = 3
 
+  bypassed = bypass_cooldown and not ready
+  points = care_reward_points(cat, action, bypassed_cooldown=bypassed)
   await update_cat(cat)
   balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
   bypass_note = (
-    "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل."
-    if bypass_cooldown and not ready
+    "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل؛ الرعاية تنحسب بدون نقاط إضافية."
+    if bypassed
     else ""
   )
   await message.answer(
