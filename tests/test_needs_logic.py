@@ -7,6 +7,7 @@ from bot.services.local_store import (
     apply_care_effects,
     apply_decay,
     can_bypass_action_cooldown,
+    care_reward_points,
     collect_needs,
     notification_gap_seconds,
     finish_sleep,
@@ -288,6 +289,24 @@ class CoupledNeedsTests(unittest.TestCase):
         mild = notification_gap_seconds(["peckish"])
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
+
+    def test_need_bypass_never_awards_points(self) -> None:
+        cat = old_cat(0)
+        self.assertEqual(
+            care_reward_points(cat, "feed", bypassed_cooldown=True),
+            0,
+        )
+        self.assertEqual(
+            care_reward_points(cat, "talk", bypassed_cooldown=True),
+            0,
+        )
+
+    def test_low_relationship_needs_talk_immediately(self) -> None:
+        cat = old_cat(0)
+        cat["last_social_at"] = datetime.utcnow().isoformat()
+        cat["love_bar"] = 20
+        self.assertTrue(can_bypass_action_cooldown(cat, "talk"))
+        self.assertEqual(recommended_action(cat), "talk")
 
     def test_social_attention_warning_precedes_boredom(self) -> None:
         cat = old_cat(0)
