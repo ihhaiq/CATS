@@ -46,13 +46,18 @@ def _adopted_card(
     if newly_adopted
     else f"🐾 قطتك {html.escape(str(cat['name']))}"
   )
+  status_data = (
+    f"cat:{cat['cat_id']}:status"
+    if cat.get("cat_id")
+    else "cat:status"
+  )
   return InputRichMessage(
     html=f"""
 <h2>{heading}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))}</p>
 <p>رقمها: #{html.escape(str(cat['id_number']))}</p>
 <tg-button-row align="center">
-<tg-button type="callback_data" style="primary" data="cat:status">عرض القطة</tg-button>
+<tg-button type="callback_data" style="primary" data="{status_data}">عرض القطة</tg-button>
 </tg-button-row>
 """.strip(),
     is_rtl=True,
