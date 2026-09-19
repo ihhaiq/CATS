@@ -265,7 +265,7 @@ async def build_rich_card(
         if primary_need
         else "😺 حالتها مستقرة هسه."
     )
-    html = f"""
+    html_markup = f"""
 <h2>{html.escape(str(cat['name']))}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}</p>
 <hr/>
@@ -287,4 +287,4 @@ async def build_rich_card(
 {sleep_note}
 {notice_html}
 """.strip()
-    return InputRichMessage(html=html, is_rtl=True, media=media_list)
+    return InputRichMessage(html=html_markup, is_rtl=True, media=media_list)
