@@ -16,6 +16,7 @@ from bot.services.local_store import (
     apply_decay,
     award_points,
     clear_action_notice,
+    can_bypass_feed_cooldown,
     ensure_user,
     finish_sleep,
     get_user_cat,
@@ -234,7 +235,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             parse_time(cat["last_fed"]),
             settings.feed_cooldown,
         )
-        if not ready:
+        if not ready and not can_bypass_feed_cooldown(cat):
             await query.answer(
                 f"الإطعام متاح بعد {left // 60} دقيقة.",
                 show_alert=True,
