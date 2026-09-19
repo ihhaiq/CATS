@@ -219,6 +219,11 @@ def sleep_need_percent(cat: dict) -> int:
     return _refresh_rest(cat)
 
 
+def fullness_percent(cat: dict) -> int:
+    """User-facing fullness: 100 = full, 0 = starving."""
+    return max(0, min(100, 100 - int(cat.get("hunger", 20))))
+
+
 def wake_if_ready(cat: dict) -> bool:
     if cat.get("sleep_until") and not is_sleeping(cat):
         return finish_sleep(cat)
@@ -534,9 +539,22 @@ def apply_care_effects(cat: dict, action: str) -> None:
         cat["hunger"] = min(100, hunger_before + 10)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 12)
     elif action == "talk":
-        meaningful = boredom >= 15 or happiness_before <= 85 or trust <= 65
-        cat["happiness"] = min(100, happiness_before + 7)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 3)
+        meaningful = (
+            boredom >= 15
+            or happiness_before <= 85
+            or trust <= 65
+            or int(cat.get("love_bar", 100)) <= 50
+        )
+        if streak == 1:
+            happiness_gain, love_gain = 7, 3
+        elif streak == 2:
+            happiness_gain, love_gain = 5, 2
+        elif streak == 3:
+            happiness_gain, love_gain = 3, 1
+        else:
+            happiness_gain, love_gain = 1, 0
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
         cat["boredom"] = max(0, boredom - round(25 * novelty))
         cat["last_social_at"] = moment.isoformat()
     else:
@@ -562,15 +580,18 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
 def _attention_due(cat: dict, moment: datetime) -> bool:
     """Whether the cat currently needs a real social interaction."""
+    boredom = int(cat.get("boredom", 10))
+    happiness = int(cat.get("happiness", 100))
+    trust = int(cat.get("trust", 60))
+    love = int(cat.get("love_bar", 100))
+
+    # Relationship or mood trouble is actionable immediately. Mild loneliness
+    # still needs time without interaction before it becomes a real need.
+    if love <= 30 or trust <= 35 or happiness <= 40 or boredom >= 65:
+        return True
+
     social_hours = _social_hours(cat, moment)
-    if social_hours < 10:
-        return False
-    return (
-        int(cat.get("boredom", 10)) >= 25
-        or int(cat.get("happiness", 100)) <= 50
-        or int(cat.get("trust", 60)) <= 35
-        or int(cat.get("love_bar", 100)) <= 30
-    )
+    return social_hours >= 10 and (boredom >= 25 or happiness <= 50)
 
 
 def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
@@ -614,23 +635,40 @@ def recommended_action(cat: dict) -> str | None:
     rest = sleep_need_percent(cat)
     moment = datetime.utcnow()
 
-    if hunger >= 90:
+    if hunger >= settings.hunger_alert_threshold:
         return "feed"
     if rest <= 30:
         return "sleep"
-    if hunger >= settings.hunger_alert_threshold:
-        return "feed"
+    if _attention_due(cat, moment):
+        return "talk"
     if _walk_hours(cat, moment) >= WALK_DUE_HOURS:
         return "walk"
     if int(cat.get("boredom", 10)) >= 35:
         if _action_overused(cat, "play", moment):
             return "talk"
         return "play"
-    if _attention_due(cat, moment):
-        return "talk"
     if rest <= 50:
         return "sleep"
     return None
+
+
+def care_reward_points(
+    cat: dict,
+    action: str,
+    *,
+    bypassed_cooldown: bool = False,
+) -> int:
+    """Same reward on every surface; need-rescue bypasses never farm points."""
+    if bypassed_cooldown:
+        return 0
+    if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
+        return 0
+    return {
+        "feed": 5,
+        "play": 5,
+        "walk": 10,
+        "talk": 3,
+    }.get(action, 0)
 
 
 def collect_needs(cat: dict) -> list[str]:
