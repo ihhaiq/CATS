@@ -16,6 +16,7 @@ from bot.services.local_store import (
   ensure_user,
   finish_sleep,
   fullness_percent,
+  get_latest_cat_for_user,
   get_user_cat,
   get_user_points,
   is_sleeping,
@@ -60,6 +61,10 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   await ensure_user(user_id)
   cat = await get_user_cat(user_id)
   if cat is None:
+    latest = await get_latest_cat_for_user(user_id)
+    if latest is not None and latest.get("is_fled"):
+      await message.answer("💨 قطتك هربت بسبب الإهمال، وما عادت أفعال العناية متاحة.")
+      return
     await message.answer("ما عندك قطة. استخدم /adopt اسم_القطة أولاً.")
     return
 
