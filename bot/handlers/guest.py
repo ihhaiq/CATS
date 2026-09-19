@@ -102,7 +102,9 @@ def _state_text(cat: dict) -> str:
         f"السلالة: {cat['breed']} | #{cat['id_number']}\n"
         f"الجوع: {cat['hunger']}/100\n"
         f"السعادة: {cat['happiness']}/100\n"
-        f"الحب: {cat['love_bar']}/100"
+        f"الحب: {cat['love_bar']}/100\n"
+        f"الثقة: {cat.get('trust', 60)}/100\n"
+        f"الملل: {cat.get('boredom', 10)}/100"
     )
 
 
@@ -220,6 +222,10 @@ async def guest_message(message: Message) -> None:
                 "hunger": 20,
                 "happiness": 100,
                 "love_bar": 100,
+                "trust": 60,
+                "boredom": 10,
+                "last_care_action": None,
+                "same_action_streak": 0,
                 "partner_affinity": 0,
                 "is_fled": False,
                 "last_fed": stamp,
@@ -305,7 +311,9 @@ async def guest_message(message: Message) -> None:
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
             elif action == "talk":
-                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "talk")
+                preview = dict(cat)
+                apply_care_effects(preview, "talk")
+                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "talk")
                 result = InlineQueryResultArticle(
                     id="guest-talk",
                     title="التحدث مع القطة",
