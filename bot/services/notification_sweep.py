@@ -57,21 +57,27 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
    else:
       message = "استيقظت قطتك 🐈\n😺 شبعت نوم وصحت من نفسها."
 
-   sent = False
-   for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
+   recipients = {cat["owner_id"], cat.get("partner_id")} - {None}
+   sent_to = {
+      int(user_id)
+      for user_id in cat.get("wake_notice_sent_to", [])
+   }
+   for user_id in recipients - sent_to:
       try:
          await bot.send_message(user_id, message)
-         sent = True
+         sent_to.add(user_id)
       except Exception as exc:
          logger.warning("Failed to send wake notice user_id=%s: %s", user_id, exc)
 
-   # A wake event is delivered at most once. If Telegram failed for every
-   # recipient, keep it pending so the next sweep can retry.
-   if sent:
+   if recipients.issubset(sent_to):
       cat.pop("wake_notice_pending", None)
       cat.pop("wake_notice_kind", None)
       cat.pop("wake_notice_at", None)
-   return sent
+      cat.pop("wake_notice_sent_to", None)
+      return True
+
+   cat["wake_notice_sent_to"] = sorted(sent_to)
+   return False
 
 
 async def _wake_sweep(bot: Bot) -> None:
