@@ -364,7 +364,11 @@ def clear_action_notice(cat: dict) -> None:
 
 
 def _walk_hours(cat: dict, moment: datetime) -> float:
-    value = cat.get("last_walk")
+    value = (
+        cat.get("last_walk")
+        or cat.get("adopted_at")
+        or cat.get("created_at")
+    )
     if not value:
         return 0.0
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
