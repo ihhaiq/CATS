@@ -1,8 +1,18 @@
 """Inline mode for quick, read-only cat status previews in groups."""
+import html
 from aiogram import Router
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
-from bot.services.local_store import apply_decay, ensure_user, get_user_cat, update_cat
+from bot.services.local_store import (
+    apply_care_effects,
+    apply_decay,
+    ensure_user,
+    finish_sleep,
+    fullness_percent,
+    get_user_cat,
+    sleep_need_percent,
+    update_cat,
+)
 
 router = Router(name="inline")
 
@@ -25,11 +35,14 @@ _ALIASES = {
 
 def _state_text(cat: dict) -> str:
     return (
-        f"🐾 {cat['name']}\n"
-        f"السلالة: {cat['breed']} | #{cat['id_number']}\n"
-        f"الجوع: {cat['hunger']}/100\n"
+        f"🐾 {html.escape(str(cat['name']))}\n"
+        f"السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}\n"
+        f"الشبع: {fullness_percent(cat)}/100\n"
         f"السعادة: {cat['happiness']}/100\n"
-        f"الحب: {cat['love_bar']}/100"
+        f"الحب: {cat['love_bar']}/100\n"
+        f"الثقة: {cat.get('trust', 60)}/100\n"
+        f"الملل: {cat.get('boredom', 10)}/100\n"
+        f"الراحة: {sleep_need_percent(cat)}/100"
     )
 
 
@@ -49,22 +62,18 @@ async def inline_cat(inline_query: InlineQuery) -> None:
         title = "لا توجد قطة"
     else:
         apply_decay(cat)
+        finish_sleep(cat)
         await update_cat(cat)
-        if action == "feed":
+        if action in {"feed", "play", "walk"}:
             preview = dict(cat)
-            preview["hunger"] = max(0, preview["hunger"] - 30)
-            title = "معاينة الإطعام"
-            text = "🍖 معاينة بعد الإطعام\n" + _state_text(preview)
-        elif action == "play":
-            preview = dict(cat)
-            preview["happiness"] = min(100, preview["happiness"] + 25)
-            title = "معاينة اللعب"
-            text = "🎾 معاينة بعد اللعب\n" + _state_text(preview)
-        elif action == "walk":
-            preview = dict(cat)
-            preview["happiness"] = min(100, preview["happiness"] + 15)
-            title = "معاينة النزهة"
-            text = "🚶 معاينة بعد النزهة\n" + _state_text(preview)
+            apply_care_effects(preview, action)
+            title = {
+                "feed": "معاينة الإطعام",
+                "play": "معاينة اللعب",
+                "walk": "معاينة النزهة",
+            }[action]
+            icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
+            text = f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n" + _state_text(preview)
         else:
             title = "حالة قطتك"
             text = _state_text(cat)
