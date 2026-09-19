@@ -19,6 +19,17 @@ from bot.services.local_store import (
 from bot.services.media_runtime import resolve_cat_media
 
 
+def build_fled_card(cat: dict) -> InputRichMessage:
+    name = html.escape(str(cat.get("name", "قطتك")))
+    return InputRichMessage(
+        html=(
+            f"<h2>💨 هربت {name}</h2>"
+            "<p>وصل الحب إلى 0 بسبب الإهمال، لذلك ما عادت أفعال العناية متاحة.</p>"
+        ),
+        is_rtl=True,
+    )
+
+
 async def build_rich_card(
     bot,
     cat: dict,
