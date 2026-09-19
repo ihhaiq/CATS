@@ -61,6 +61,8 @@ async def _care(message: Message, action: str) -> None:
       await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
     elif block_reason == "starving":
       await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.")
+    elif block_reason == "bored_of_play":
+      await message.answer("😾 ملت من نفس اللعب. حچي وياها أو طلّعها نزهة وغيّر الروتين.")
     else:
       await message.answer("🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.")
     return
