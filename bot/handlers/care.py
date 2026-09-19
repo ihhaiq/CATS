@@ -12,11 +12,10 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from datetime import datetime
-import random
 
 from bot.config import settings
 from bot.services.economy import check_cooldown
-from bot.services.local_store import apply_care_effects, apply_decay, award_points, can_bypass_feed_cooldown, get_user_cat, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
+from bot.services.local_store import apply_care_effects, apply_decay, award_points, action_block_reason, can_bypass_action_cooldown, get_user_cat, get_user_points, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
 
 router = Router(name="care")
 
@@ -36,6 +35,11 @@ async def cmd_walk(message: Message) -> None:
   await _care(message, "walk")
 
 
+@router.message(Command("talk", "تحدث", "احجي", "حچي"))
+async def cmd_talk(message: Message) -> None:
+  await _care(message, "talk")
+
+
 async def _care(message: Message, action: str) -> None:
   user_id = message.from_user.id
   await ensure_user(user_id)
@@ -45,50 +49,79 @@ async def _care(message: Message, action: str) -> None:
     return
 
   apply_decay(cat)
-  refusal_until = cat.get("action_refusal_until")
   if is_sleeping(cat):
     await update_cat(cat)
-    await message.answer("😾 القطة تحتاج النوم الآن وترفض هذا الفعل.")
+    await message.answer("😴 القطة نائمة هسه. إذا تريد تتفاعل وياها، صحّيها أولاً.")
     return
-  if (
-    refusal_until
-    and datetime.utcnow().timestamp() < refusal_until
-    and action in {"play", "walk"}
-  ):
+
+  block_reason = action_block_reason(cat, action)
+  if block_reason:
     await update_cat(cat)
-    await message.answer("😾 القطة مرهقة، خليها ترتاح شوي قبل اللعب أو النزهة.")
+    if block_reason == "full":
+      await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
+    elif block_reason == "starving":
+      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.")
+    else:
+      await message.answer("🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.")
     return
-  if refusal_until:
-    cat.pop("action_refusal_until", None)
-  elif sleep_need_percent(cat) <= 20 and action in {"play", "walk"}:
-    cat["action_refusal_until"] = datetime.utcnow().timestamp() + random.randint(120, 300)
-    await update_cat(cat)
-    await message.answer("😾 القطة مرهقة جداً وتحتاج تنام قبل اللعب أو النزهة.")
-    return
-  if action == "feed" and int(cat.get("hunger", 20)) <= 15:
-    await update_cat(cat)
-    await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
-    return
-  timestamp_key = {"feed": "last_fed", "play": "last_played", "walk": "last_walk"}[action]
-  cooldown = {"feed": settings.feed_cooldown, "play": settings.play_cooldown, "walk": settings.walk_cooldown}[action]
-  ready, seconds_left = check_cooldown(parse_time(cat[timestamp_key]), cooldown)
-  bypass_cooldown = action == "feed" and can_bypass_feed_cooldown(cat)
+
+  timestamp_key = {
+    "feed": "last_fed",
+    "play": "last_played",
+    "walk": "last_walk",
+    "talk": "last_talk",
+  }[action]
+  cooldown = {
+    "feed": settings.feed_cooldown,
+    "play": settings.play_cooldown,
+    "walk": settings.walk_cooldown,
+    "talk": settings.talk_cooldown,
+  }[action]
+
+  last_action = cat.get(timestamp_key)
+  if last_action:
+    ready, seconds_left = check_cooldown(parse_time(last_action), cooldown)
+  else:
+    ready, seconds_left = True, 0
+
+  bypass_cooldown = can_bypass_action_cooldown(cat, action)
   if not ready and not bypass_cooldown:
-    await message.answer(f"⏳ انتظر {seconds_left // 60} دقيقة قبل هذا الفعل مرة ثانية.")
+    await message.answer(
+      f"⏳ انتظر {max(1, seconds_left // 60)} دقيقة قبل هذا الفعل مرة ثانية."
+    )
     await update_cat(cat)
     return
 
   apply_care_effects(cat, action)
+  cat[timestamp_key] = datetime.utcnow().isoformat()
+
   if action == "feed":
-    text = "🍖 شبعت القطة وصارت أهدأ وأسعد"
+    text = "🍖 أكلت القطة وصارت أهدأ وأسعد"
     points = 5
   elif action == "play":
-    text = "🎾 انبسطت القطة باللعب"
-    points = 5
-  else:
-    text = "🚶 طلعت القطة نزهة وانبسطت"
+    if int(cat.get("same_action_streak", 1)) >= 5:
+      text = "😾 ملت من نفس اللعب؛ غيّر النشاط وياها"
+      points = 0
+    else:
+      text = "🎾 انبسطت القطة باللعب"
+      points = 5
+  elif action == "walk":
+    text = "🌿 طلعت القطة نزهة وانبسطت"
     points = 10
-  cat[timestamp_key] = datetime.utcnow().isoformat()
+  else:
+    text = "💬 ارتاحت القطة للحچي وياك"
+    points = 3
+
   await update_cat(cat)
-  balance = await award_points(user_id, points, action)
-  await message.answer(f"{text}!\nالجوع: {cat['hunger']}/100 | السعادة: {cat['happiness']}/100\nنقاطك: {balance}")
+  balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
+  bypass_note = (
+    "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل."
+    if bypass_cooldown and not ready
+    else ""
+  )
+  await message.answer(
+    f"{text}!{bypass_note}\n"
+    f"الجوع: {cat['hunger']}/100 | السعادة: {cat['happiness']}/100 | "
+    f"الملل: {cat.get('boredom', 10)}/100 | الراحة: {sleep_need_percent(cat)}/100\n"
+    f"نقاطك: {balance}"
+  )
