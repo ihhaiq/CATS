@@ -102,6 +102,7 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "last_care_at": None,
     "last_social_at": stamp,
     "last_talk": None,
+    "last_relax": None,
     "same_action_streak": 0,
     "partner_affinity": 0,
     "is_fled": False,
