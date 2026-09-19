@@ -3,11 +3,13 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.services.local_store import (
+    action_block_reason,
     apply_care_effects,
     apply_decay,
-    can_bypass_feed_cooldown,
+    can_bypass_action_cooldown,
     collect_needs,
     notification_gap_seconds,
+    recommended_action,
     sleep_need_percent,
 )
 
@@ -169,11 +171,61 @@ class CoupledNeedsTests(unittest.TestCase):
     def test_hungry_cat_bypasses_feed_cooldown(self) -> None:
         cat = old_cat(0)
         cat["hunger"] = 69
-        self.assertFalse(can_bypass_feed_cooldown(cat))
+        self.assertFalse(can_bypass_action_cooldown(cat, "feed"))
         cat["hunger"] = 70
-        self.assertTrue(can_bypass_feed_cooldown(cat))
+        self.assertTrue(can_bypass_action_cooldown(cat, "feed"))
         apply_care_effects(cat, "feed")
-        self.assertFalse(can_bypass_feed_cooldown(cat))
+        self.assertFalse(can_bypass_action_cooldown(cat, "feed"))
+
+    def test_bored_cat_bypasses_play_cooldown_until_need_is_met(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 34
+        self.assertFalse(can_bypass_action_cooldown(cat, "play"))
+        cat["boredom"] = 70
+        self.assertTrue(can_bypass_action_cooldown(cat, "play"))
+        apply_care_effects(cat, "play")
+        self.assertTrue(cat["boredom"] < 70)
+
+    def test_overdue_walk_bypasses_walk_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 100
+        cat["last_walk"] = (datetime.utcnow() - timedelta(hours=15)).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "walk"))
+        self.assertIn("walk_due", collect_needs(cat))
+        cat["last_walk"] = datetime.utcnow().isoformat()
+        self.assertFalse(can_bypass_action_cooldown(cat, "walk"))
+
+    def test_social_need_bypasses_talk_cooldown_once(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 30
+        cat["last_social_at"] = (
+            datetime.utcnow() - timedelta(hours=11)
+        ).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "talk"))
+        apply_care_effects(cat, "talk")
+        self.assertFalse(can_bypass_action_cooldown(cat, "talk"))
+
+    def test_physical_actions_yield_to_hunger_and_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 90
+        self.assertEqual(action_block_reason(cat, "play"), "starving")
+        self.assertEqual(action_block_reason(cat, "walk"), "starving")
+
+        cat["hunger"] = 20
+        cat["rest_level"] = 30
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertEqual(action_block_reason(cat, "play"), "tired")
+        self.assertEqual(action_block_reason(cat, "walk"), "tired")
+
+    def test_recommended_action_uses_real_priority(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 10
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        cat["hunger"] = 95
+        self.assertEqual(recommended_action(cat), "feed")
+
+        cat["hunger"] = 20
+        self.assertEqual(recommended_action(cat), "sleep")
 
     def test_alerts_have_progressive_severity(self) -> None:
         cat = old_cat(0)
