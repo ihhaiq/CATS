@@ -1,6 +1,7 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -284,11 +285,21 @@ def start_sleep(cat: dict) -> int:
 
 
 def finish_sleep(cat: dict) -> bool:
-    """Finish only a naturally completed sleep session and queue a wake event."""
-    if not cat.get("sleep_until") or is_sleeping(cat):
+    """Finish a nap on time or a main sleep when fully rested/on time."""
+    if not cat.get("sleep_until"):
         return False
+
     now = datetime.utcnow()
-    _refresh_rest(cat, now)
+    if is_sleeping(cat):
+        if cat.get("sleep_kind") != "main":
+            return False
+        if _refresh_rest(cat, now) < 98:
+            return False
+        # Main sleep can end early as soon as the rest meter is effectively full.
+        cat["sleep_until"] = now.isoformat()
+    else:
+        _refresh_rest(cat, now)
+
     _commit_sleep_today(cat, now)
 
     kind = cat.get("sleep_kind") or "sleep"
@@ -483,6 +494,20 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
         moment - parse_time(previous_at)
     ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
     return recent and int(cat.get("same_action_streak", 0)) >= 5
+
+
+def care_reward_points(cat: dict, action: str) -> int:
+    """Use one reward table across commands, Rich buttons and Guest Mode."""
+    if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
+        return 0
+    pools = {
+        "feed": [0, 0, 2, 5, 8],
+        "play": [0, 1, 3, 5, 10],
+        "walk": [0, 2, 5, 10, 15],
+        "talk": [0, 1, 2, 4],
+    }
+    values = pools.get(action)
+    return random.choice(values) if values else 0
 
 
 def apply_care_effects(cat: dict, action: str) -> None:
