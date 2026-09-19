@@ -10,7 +10,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputRichMessage, Message
 
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
+from bot.services.local_store import (
+  create_cat,
+  ensure_user,
+  get_user_cat,
+  now_iso,
+  user_action_lock,
+)
 
 router = Router(name="adopt")
 
@@ -64,10 +70,15 @@ def _adopted_card(
   )
 
 
-async def _send_adopted(message: Message, cat: dict) -> None:
+async def _send_adopted(
+  message: Message,
+  cat: dict,
+  *,
+  newly_adopted: bool = True,
+) -> None:
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
-    rich_message=_adopted_card(cat),
+    rich_message=_adopted_card(cat, newly_adopted=newly_adopted),
   )
 
 
@@ -108,6 +119,15 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
   }
   await create_cat(cat)
   return cat
+
+
+async def _get_or_create_cat(user_id: int, name: str) -> tuple[dict, bool]:
+  async with user_action_lock(user_id):
+    await ensure_user(user_id)
+    existing = await get_user_cat(user_id)
+    if existing is not None:
+      return existing, False
+    return await _create_cat_for_user(user_id, name), True
 
 
 @router.message(CommandStart())
@@ -174,32 +194,19 @@ async def receive_adopt_name(message: Message, state: FSMContext) -> None:
     return
 
   user_id = message.from_user.id
-  await ensure_user(user_id)
-  existing = await get_user_cat(user_id)
-  if existing is not None:
-    await state.clear()
-    await _send_adopted(message, existing)
-    return
-
-  cat = await _create_cat_for_user(user_id, name)
+  cat, created = await _get_or_create_cat(user_id, name)
   await state.clear()
-  await _send_adopted(message, cat)
+  await _send_adopted(message, cat, newly_adopted=created)
 
 
 @router.message(Command("adopt", "تبني", "تبنّي"))
 async def cmd_adopt(message: Message) -> None:
   user_id = message.from_user.id
-  await ensure_user(user_id)
-  existing = await get_user_cat(user_id)
-  if existing is not None:
-    await _send_adopted(message, existing)
-    return
-
   parts = (message.text or "").split(maxsplit=1)
   name = parts[1].strip() if len(parts) > 1 else "لوز"
   if len(name) > 40:
     await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
     return
 
-  cat = await _create_cat_for_user(user_id, name)
-  await _send_adopted(message, cat)
+  cat, created = await _get_or_create_cat(user_id, name)
+  await _send_adopted(message, cat, newly_adopted=created)
