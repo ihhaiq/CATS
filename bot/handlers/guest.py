@@ -320,6 +320,9 @@ async def guest_message(message: Message) -> None:
                     elif block_reason == "starving":
                         title = "🚨 الجوع أولاً"
                         description = "أطعمها قبل اللعب أو النزهة."
+                    elif block_reason == "bored_of_play":
+                        title = "😾 ملت من نفس اللعب"
+                        description = "غيّر النشاط: حچي وياها أو طلّعها نزهة."
                     else:
                         title = "🪫 تحتاج نوم"
                         description = "خليها ترتاح قبل اللعب أو النزهة."
