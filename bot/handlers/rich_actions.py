@@ -224,6 +224,12 @@ async def handle_rich_action(query: CallbackQuery) -> None:
     notice_token: str | None = None
 
     if action == "feed":
+        if int(cat.get("hunger", 20)) <= 15:
+            await query.answer(
+                "😺 القطة شبعانة هسه وما تحتاج أكل زيادة.",
+                show_alert=True,
+            )
+            return
         ready, left = check_cooldown(
             parse_time(cat["last_fed"]),
             settings.feed_cooldown,
@@ -277,10 +283,10 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     elif action == "sleep":
         rest_now = sleep_need_percent(cat)
-        if rest_now >= 85:
+        if rest_now >= 98:
             notice_token = _set_action_notice(
                 cat,
-                "😺 مو نعسانة هسه، بعد عندها طاقة.",
+                "😺 مرتاحة تقريباً بالكامل وما تحتاج تنام هسه.",
             )
             await update_cat(cat)
             await _edit_card(
