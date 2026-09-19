@@ -329,6 +329,10 @@ def finish_sleep(cat: dict) -> bool:
     cat["sleep_kind"] = None
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
+    # A natural wake is a fresh lifecycle event; old need-notification
+    # suppression must not hide the next state update.
+    cat["last_notified_state"] = None
+    cat["last_notified_at"] = None
     return True
 
 
@@ -642,6 +646,30 @@ def _attention_due(cat: dict, moment: datetime) -> bool:
 
     social_hours = _social_hours(cat, moment)
     return social_hours >= 10 and (boredom >= 25 or happiness <= 50)
+
+
+def is_action_cooldown_bypassed(cat: dict, action: str) -> bool:
+    """True only when a current need is actively overriding a live cooldown."""
+    if not can_bypass_action_cooldown(cat, action):
+        return False
+
+    specs = {
+        "feed": ("last_fed", settings.feed_cooldown),
+        "play": ("last_played", settings.play_cooldown),
+        "walk": ("last_walk", settings.walk_cooldown),
+        "talk": ("last_talk", settings.talk_cooldown),
+    }
+    spec = specs.get(action)
+    if spec is None:
+        return False
+
+    timestamp_key, cooldown = spec
+    last_action = cat.get(timestamp_key)
+    if not last_action:
+        return False
+
+    elapsed = (datetime.utcnow() - parse_time(last_action)).total_seconds()
+    return elapsed < cooldown
 
 
 def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
