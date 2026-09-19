@@ -72,6 +72,37 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الشبع", card.html)
         self.assertNotIn("الجوع:", card.html)
 
+    def test_sleeping_card_hides_care_actions(self) -> None:
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        cat = {
+            "name": "Sleepy",
+            "breed": "siamese",
+            "age_days": 30,
+            "id_number": "999999",
+            "hunger": 30,
+            "happiness": 80,
+            "love_bar": 90,
+            "trust": 70,
+            "boredom": 20,
+            "rest_level": 60,
+            "rest_updated_at": now.isoformat(),
+            "sleep_started_at": now.isoformat(),
+            "sleep_until": (now + timedelta(hours=1)).isoformat(),
+            "sleep_kind": "nap",
+            "sleep_planned_hours": 1.0,
+            "slept_today_hours": 0.0,
+            "sleep_day": now.date().isoformat(),
+        }
+        card = asyncio.run(build_rich_card(None, cat, 10, "sleep"))
+        self.assertIn("cat:wake", card.html)
+        self.assertIn("cat:status", card.html)
+        self.assertNotIn("cat:feed", card.html)
+        self.assertNotIn("cat:play", card.html)
+        self.assertNotIn("cat:walk", card.html)
+        self.assertNotIn("cat:talk", card.html)
+
     def test_local_store_creates_and_updates_json(self) -> None:
         from bot.config import settings
         from bot.services.local_store import create_cat, get_user_cat, now_iso, update_cat
