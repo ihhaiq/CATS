@@ -1,12 +1,4 @@
-"""
-/status (or /cat) — show current state + rendered image.
-TODO (AGENT.md step 7):
-  - Load cat, apply lazy decay, check flee_logic.check_flee() (may flip is_fled here).
-  - If fled: show shelter-eligible message instead of normal status.
-  - Otherwise call image_renderer.render_cat() with a cache key of
-    (breed, emotion_bucket, hunger//10, happiness//10) so unchanged states reuse the cached PNG.
-  - Send photo + a short text summary (age, hunger/happiness/love bars as emoji or numbers).
-"""
+"""/status and /cat render the current persisted Rich Card state."""
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -40,8 +32,7 @@ async def _cmd_status_locked(message: Message, user_id: int) -> None:
     return
   apply_decay(cat)
   finish_sleep(cat)
-  if cat["love_bar"] <= 0:
-    cat["is_fled"] = True
+  if cat.get("is_fled"):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")
     return
