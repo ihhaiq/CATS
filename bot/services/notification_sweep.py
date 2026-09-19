@@ -112,13 +112,12 @@ async def _wake_sweep(bot: Bot) -> None:
             if cat is None:
                continue
 
-            sleep_until = cat.get("sleep_until")
-            expired = bool(sleep_until and not is_sleeping(cat))
+            ready_to_wake = sleep_ready_to_finish(cat)
             pending = bool(cat.get("wake_notice_pending"))
-            if not expired and not pending:
+            if not ready_to_wake and not pending:
                continue
 
-            if expired:
+            if ready_to_wake:
                apply_decay(cat)
                if cat.get("is_fled"):
                   await _send_fled_notice(bot, cat)
