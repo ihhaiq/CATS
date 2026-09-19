@@ -137,13 +137,19 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   points = care_reward_points(cat, action, bypassed_cooldown=bypassed)
   await update_cat(cat)
   balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
-  bypass_note = (
-    "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل؛ الرعاية تنحسب بدون نقاط إضافية."
-    if bypassed
-    else ""
-  )
+  if bypassed:
+    reward_note = (
+      "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل؛ "
+      "الرعاية تنحسب بدون نقاط إضافية."
+    )
+  elif not cat.get("last_care_meaningful", False):
+    reward_note = (
+      "\n😺 هذا تفاعل اختياري؛ قطتك ما كانت محتاجته هسه، لذلك بدون نقاط."
+    )
+  else:
+    reward_note = ""
   await message.answer(
-    f"{text}!{bypass_note}\n"
+    f"{text}!{reward_note}\n"
     f"الشبع: {fullness_percent(cat)}/100 | السعادة: {cat['happiness']}/100 | "
     f"الملل: {cat.get('boredom', 10)}/100 | الراحة: {sleep_need_percent(cat)}/100\n"
     f"نقاطك: {balance}"
