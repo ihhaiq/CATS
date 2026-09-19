@@ -55,11 +55,18 @@ async def _sweep(bot: Bot) -> None:
          cat["last_notified_state"] = None
          cat["last_notified_at"] = None
 
-      if is_sleeping(cat):
-         await update_cat(cat)
-         continue
-
+      sleeping = is_sleeping(cat)
       needs = collect_needs(cat)
+      if sleeping:
+         # Sleeping suppresses routine activity reminders, not emergencies.
+         needs = [
+            item
+            for item in needs
+            if item in {"starving", "love_critical", "trust_critical"}
+         ]
+         if not needs:
+            await update_cat(cat)
+            continue
       state = "|".join(needs) if needs else None
       last_at = cat.get("last_notified_at")
       gap = notification_gap_seconds(needs)
