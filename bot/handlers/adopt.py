@@ -36,10 +36,19 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
   )
 
 
-def _adopted_card(cat: dict) -> InputRichMessage:
+def _adopted_card(
+  cat: dict,
+  *,
+  newly_adopted: bool = True,
+) -> InputRichMessage:
+  heading = (
+    f"🐾 تم تبني {html.escape(str(cat['name']))}!"
+    if newly_adopted
+    else f"🐾 قطتك {html.escape(str(cat['name']))}"
+  )
   return InputRichMessage(
     html=f"""
-<h2>🐾 تم تبني {html.escape(str(cat['name']))}!</h2>
+<h2>{heading}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))}</p>
 <p>رقمها: #{html.escape(str(cat['id_number']))}</p>
 <tg-button-row align="center">
@@ -103,7 +112,7 @@ async def cmd_start(message: Message) -> None:
   if cat is not None:
     await message.bot.send_rich_message(
       chat_id=message.chat.id,
-      rich_message=_adopted_card(cat),
+      rich_message=_adopted_card(cat, newly_adopted=False),
     )
     return
   await message.answer(
