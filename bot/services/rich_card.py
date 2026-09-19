@@ -8,9 +8,9 @@ from aiogram.types import (
 )
 
 from bot.services.local_store import (
-    can_bypass_action_cooldown,
     collect_needs,
     fullness_percent,
+    is_action_cooldown_bypassed,
     is_sleeping,
     recommended_action,
     sleep_duration_text,
@@ -152,22 +152,22 @@ async def build_rich_card(
     )
     feed_label = (
         "⚡ إطعام"
-        if can_bypass_action_cooldown(cat, "feed")
+        if is_action_cooldown_bypassed(cat, "feed")
         else "إطعام"
     )
     play_label = (
         "⚡ لعب"
-        if can_bypass_action_cooldown(cat, "play")
+        if is_action_cooldown_bypassed(cat, "play")
         else "لعب"
     )
     walk_label = (
         "⚡ نزهة"
-        if can_bypass_action_cooldown(cat, "walk")
+        if is_action_cooldown_bypassed(cat, "walk")
         else "نزهة"
     )
     talk_label = (
         "⚡ تحدث"
-        if can_bypass_action_cooldown(cat, "talk")
+        if is_action_cooldown_bypassed(cat, "talk")
         else "تحدث"
     )
     sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
