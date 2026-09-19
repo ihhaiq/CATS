@@ -405,12 +405,15 @@ def apply_care_effects(cat: dict, action: str) -> None:
         elif streak == 4:
             happiness_gain, love_gain, boredom_delta = 6, 2, -6
         else:
-            happiness_gain, love_gain = 2, 1
-            boredom_delta = min(15, 5 + (streak - 5) * 3)
+            happiness_gain, love_gain = 0, 0
+            boredom_delta = min(20, 8 + (streak - 5) * 4)
 
         cat["happiness"] = min(100, happiness_before + happiness_gain)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
-        cat["boredom"] = max(0, min(100, boredom + boredom_delta))
+        if streak >= 5:
+            cat["boredom"] = min(100, max(45, boredom + boredom_delta))
+        else:
+            cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + 7)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
     elif action == "walk":
