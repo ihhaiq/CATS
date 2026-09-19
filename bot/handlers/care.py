@@ -65,6 +65,10 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   apply_decay(cat)
   finish_sleep(cat)
+  if cat.get("is_fled"):
+    await update_cat(cat)
+    await message.answer("💨 القطة هربت بسبب الإهمال، وما تگدر تستخدم أفعال العناية عليها.")
+    return
   if is_sleeping(cat):
     await update_cat(cat)
     remaining = sleep_duration_text(sleep_remaining_minutes(cat))
