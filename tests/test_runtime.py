@@ -116,6 +116,36 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("&lt;b&gt;Test&lt;/b&gt;", card.html)
         self.assertNotIn("<h2><b>Test</b></h2>", card.html)
 
+    def test_lightning_only_marks_live_cooldown_bypass(self) -> None:
+        from datetime import datetime
+
+        base = {
+            "name": "Hungry",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "121212",
+            "hunger": 80,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "slept_today_hours": 0.0,
+        }
+
+        ready_cat = dict(base, last_fed=None)
+        ready_card = asyncio.run(build_rich_card(None, ready_cat, 0))
+        self.assertIn("🎯 المطلوب هسه: 🍖 إطعام", ready_card.html)
+        self.assertNotIn(">⚡ إطعام</tg-button>", ready_card.html)
+
+        cooldown_cat = dict(base, last_fed=datetime.utcnow().isoformat())
+        cooldown_card = asyncio.run(build_rich_card(None, cooldown_cat, 0))
+        self.assertIn(">⚡ إطعام</tg-button>", cooldown_card.html)
+
     def test_sleeping_card_hides_care_actions(self) -> None:
         from datetime import datetime, timedelta
 
