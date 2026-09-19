@@ -20,6 +20,7 @@ from bot.services.local_store import (
   get_user_cat,
   get_user_points,
   is_sleeping,
+  mark_fled_if_needed,
   parse_time,
   sleep_duration_text,
   sleep_need_percent,
@@ -70,6 +71,10 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   apply_decay(cat)
   finish_sleep(cat)
+  if mark_fled_if_needed(cat):
+    await update_cat(cat)
+    await message.answer("💨 القطة هربت بسبب الإهمال.")
+    return
   if cat.get("is_fled"):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال، وما تگدر تستخدم أفعال العناية عليها.")
