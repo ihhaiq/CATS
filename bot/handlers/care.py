@@ -16,7 +16,7 @@ import random
 
 from bot.config import settings
 from bot.services.economy import check_cooldown
-from bot.services.local_store import apply_care_effects, apply_decay, award_points, get_user_cat, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
+from bot.services.local_store import apply_care_effects, apply_decay, award_points, can_bypass_feed_cooldown, get_user_cat, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
 
 router = Router(name="care")
 
@@ -72,7 +72,8 @@ async def _care(message: Message, action: str) -> None:
   timestamp_key = {"feed": "last_fed", "play": "last_played", "walk": "last_walk"}[action]
   cooldown = {"feed": settings.feed_cooldown, "play": settings.play_cooldown, "walk": settings.walk_cooldown}[action]
   ready, seconds_left = check_cooldown(parse_time(cat[timestamp_key]), cooldown)
-  if not ready:
+  bypass_cooldown = action == "feed" and can_bypass_feed_cooldown(cat)
+  if not ready and not bypass_cooldown:
     await message.answer(f"⏳ انتظر {seconds_left // 60} دقيقة قبل هذا الفعل مرة ثانية.")
     await update_cat(cat)
     return
