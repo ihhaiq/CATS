@@ -81,6 +81,15 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
    return False
 
 
+async def _send_fled_notice(bot: Bot, cat: dict) -> None:
+   message = "💨 قطتك هربت بسبب الإهمال."
+   for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
+      try:
+         await bot.send_message(user_id, message)
+      except Exception as exc:
+         logger.warning("Failed to send flee notice user_id=%s: %s", user_id, exc)
+
+
 async def _wake_sweep(bot: Bot) -> None:
    async with _sweep_lock:
       for snapshot in await get_active_cats():
@@ -111,6 +120,10 @@ async def _wake_sweep(bot: Bot) -> None:
 
             if expired:
                apply_decay(cat)
+               if cat.get("is_fled"):
+                  await _send_fled_notice(bot, cat)
+                  await update_cat(cat)
+                  continue
                woke = finish_sleep(cat)
                if woke:
                   cat["last_notified_state"] = None
@@ -133,6 +146,10 @@ async def _sweep(bot: Bot) -> None:
                continue
             # Decay first while sleep interval metadata still exists, then finalize wake.
             apply_decay(cat)
+            if cat.get("is_fled"):
+               await _send_fled_notice(bot, cat)
+               await update_cat(cat)
+               continue
             woke = finish_sleep(cat)
             if woke:
                cat["last_notified_state"] = None
