@@ -9,8 +9,12 @@ from bot.services.local_store import (
     can_bypass_action_cooldown,
     collect_needs,
     notification_gap_seconds,
+    finish_sleep,
     recommended_action,
+    sleep_plan,
     sleep_need_percent,
+    start_sleep,
+    wake_now,
 )
 
 
@@ -167,9 +171,50 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
         cat["sleep_started_at"] = (now - timedelta(hours=2)).isoformat()
         cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
-        cat["slept_today_hours"] = 8.0
+        cat["slept_today_hours"] = 16.0
         apply_decay(cat)
         self.assertGreater(cat["boredom"], 20)
+
+    def test_exhausted_cat_gets_real_main_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 20
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        kind, hours = sleep_plan(cat)
+        self.assertEqual(kind, "main")
+        self.assertGreaterEqual(hours, 4.0)
+        self.assertLessEqual(hours, 10.0)
+
+    def test_moderately_tired_cat_gets_nap(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 70
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        kind, hours = sleep_plan(cat)
+        self.assertEqual(kind, "nap")
+        self.assertGreaterEqual(hours, 0.75)
+        self.assertLessEqual(hours, 2.5)
+
+    def test_natural_wake_queues_notification(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 50
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_planned_hours"] = 1.0
+        cat["sleep_kind"] = "nap"
+        self.assertTrue(finish_sleep(cat))
+        self.assertTrue(cat["wake_notice_pending"])
+        self.assertEqual(cat["wake_notice_kind"], "nap")
+        self.assertIsNone(cat["sleep_until"])
+
+    def test_manual_wake_does_not_queue_natural_notice(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 60
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        start_sleep(cat)
+        self.assertTrue(wake_now(cat))
+        self.assertFalse(cat.get("wake_notice_pending", False))
+        self.assertIsNone(cat["sleep_until"])
 
     def test_hungry_cat_bypasses_feed_cooldown(self) -> None:
         cat = old_cat(0)
