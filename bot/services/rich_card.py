@@ -6,7 +6,7 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
-from bot.services.local_store import is_sleeping, sleep_need_percent
+from bot.services.local_store import collect_needs, is_sleeping, sleep_need_percent
 from bot.services.media_runtime import resolve_cat_media
 
 
@@ -49,6 +49,26 @@ async def build_rich_card(
     wake_label = "إيقاظ" if sleeping else "نوم"
     fullness = 100 - cat["hunger"]
     sleep_need = sleep_need_percent(cat)
+    needs = collect_needs(cat)
+    hint_map = {
+        "starving": "🚨🍖 جوعها شديد جداً.",
+        "hungry": "🍗 جائعة وتحتاج أكل.",
+        "exhausted": "🪫 منهكة وتحتاج نوم طويل.",
+        "tired": "😴 تعبانة وتحتاج ترتاح.",
+        "very_bored": "🙀 الملل عندها صار شديد.",
+        "bored": "🌀 حست بالملل وتريد لعب أو حديث.",
+        "restless": "😼 بدت تمل وتدور شي تسويه.",
+        "very_sad": "💔😿 حزينة جداً.",
+        "sad": "😿 مزاجها مو زين.",
+        "trust_critical": "🧊 ثقتها بيك ضعفت هواية.",
+        "trust_low": "🤝 ثقتها تحتاج رعاية ثابتة.",
+        "love_critical": "💔 رابطتكم بحالة حرجة.",
+        "love_low": "🥺 حست بالإهمال.",
+        "walk_due": "🌿 محتاجة نزهة وتغيير جو.",
+        "sleepy": "🥱 بدت تنعس.",
+        "peckish": "🥣 بدت تجوع شوي.",
+    }
+    state_hint = hint_map.get(needs[0], "") if needs else "😺 حالتها مستقرة هسه."
     html = f"""
 <h2>{cat['name']}</h2>
 <p>السلالة: {cat['breed']} | #{cat['id_number']}</p>
@@ -64,6 +84,7 @@ async def build_rich_card(
 <tr><td>الملل</td><td>{cat.get('boredom', 10)}%</td></tr>
 <tr><td>الراحة والنوم</td><td>{sleep_need}%</td></tr>
 </table>
+<p><b>{state_hint}</b></p>
 <p>🐾 العملة القططية: {points}</p>
 <tg-button-row align="center">
 <tg-button type="callback_data" style="success" data="cat:feed">إطعام</tg-button>
