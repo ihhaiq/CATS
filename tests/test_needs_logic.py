@@ -288,6 +288,15 @@ class CoupledNeedsTests(unittest.TestCase):
         apply_care_effects(cat, "play")
         self.assertTrue(cat["boredom"] < 70)
 
+    def test_never_walked_cat_becomes_due_from_adoption_time(self) -> None:
+        cat = old_cat(0)
+        cat["last_walk"] = None
+        cat["adopted_at"] = (
+            datetime.utcnow() - timedelta(hours=15)
+        ).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "walk"))
+        self.assertIn("walk_due", collect_needs(cat))
+
     def test_overdue_walk_bypasses_walk_cooldown(self) -> None:
         cat = old_cat(0)
         cat["happiness"] = 100
