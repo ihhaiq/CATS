@@ -6,6 +6,7 @@ from bot.services.local_store import (
     apply_care_effects,
     apply_decay,
     collect_needs,
+    notification_gap_seconds,
     sleep_need_percent,
 )
 
@@ -151,6 +152,20 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["slept_today_hours"] = 8.0
         apply_decay(cat)
         self.assertGreater(cat["boredom"], 20)
+
+    def test_alerts_have_progressive_severity(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 60
+        self.assertIn("peckish", collect_needs(cat))
+        cat["hunger"] = 75
+        self.assertIn("hungry", collect_needs(cat))
+        cat["hunger"] = 95
+        self.assertIn("starving", collect_needs(cat))
+
+    def test_urgent_alerts_repeat_sooner(self) -> None:
+        mild = notification_gap_seconds(["peckish"])
+        urgent = notification_gap_seconds(["starving"])
+        self.assertLess(urgent, mild)
 
     def test_multiple_needs_are_reported_together(self) -> None:
         cat = old_cat(24)
