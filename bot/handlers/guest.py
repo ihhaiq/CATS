@@ -29,7 +29,7 @@ from bot.services.local_store import (
     wake_now,
 )
 from bot.services.rich_card import build_rich_card
-from bot.services.shop import list_items, open_shop
+from bot.services.shop import open_shop
 from bot.services.shop_card import build_shop_card
 
 router = Router(name="guest")
