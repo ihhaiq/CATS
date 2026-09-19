@@ -442,11 +442,16 @@ async def _guest_message_locked(message: Message) -> None:
                 else:
                     balance = await get_user_points(user_id)
 
-                description = (
-                    "⚡ التهدئة انفتحت للحاجة؛ الرعاية تنحسب بدون نقاط إضافية."
-                    if bypassed
-                    else cat["name"]
-                )
+                if bypassed:
+                    description = (
+                        "⚡ التهدئة انفتحت للحاجة؛ الرعاية تنحسب بدون نقاط إضافية."
+                    )
+                elif not cat.get("last_care_meaningful", False):
+                    description = (
+                        "😺 تفاعل اختياري؛ ما كانت محتاجته هسه، لذلك بدون نقاط."
+                    )
+                else:
+                    description = cat["name"]
                 card = await _build_guest_card(
                     message,
                     caller,
