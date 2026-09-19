@@ -7,10 +7,27 @@ from datetime import datetime
 from aiogram import Router
 from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
 
-from bot.services.economy import assign_random_breed
-from bot.services.local_store import apply_care_effects, apply_decay, ensure_user, finish_sleep, get_user_cat, update_cat
-from bot.services.local_store import create_cat, now_iso
-from bot.services.local_store import get_user_points
+from bot.config import settings
+from bot.services.economy import assign_random_breed, check_cooldown
+from bot.services.local_store import (
+    action_block_reason,
+    apply_care_effects,
+    apply_decay,
+    award_points,
+    can_bypass_action_cooldown,
+    create_cat,
+    ensure_user,
+    finish_sleep,
+    get_user_cat,
+    get_user_points,
+    is_sleeping,
+    now_iso,
+    parse_time,
+    sleep_need_percent,
+    start_sleep,
+    update_cat,
+    wake_now,
+)
 from bot.services.rich_card import build_rich_card
 from bot.services.shop import list_items, open_shop
 from bot.services.shop_card import build_shop_card
@@ -277,70 +294,212 @@ async def guest_message(message: Message) -> None:
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
-            if action == "feed":
-                preview = dict(cat)
-                apply_care_effects(preview, "feed")
-                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "feed")
+            if action in {"feed", "play", "walk", "talk"}:
+                if is_sleeping(cat):
+                    card = await _build_guest_card(
+                        message,
+                        caller,
+                        cat,
+                        await get_user_points(user_id),
+                        "status",
+                    )
+                    result = InlineQueryResultArticle(
+                        id=f"guest-{action}-sleeping",
+                        title="😴 القطة نائمة",
+                        description="صحّيها أولاً حتى تتفاعل وياها.",
+                        input_message_content=InputRichMessageContent(rich_message=card),
+                    )
+                    await message.bot.answer_guest_query(message.guest_query_id, result)
+                    return
+
+                block_reason = action_block_reason(cat, action)
+                if block_reason:
+                    if block_reason == "full":
+                        title = "😺 القطة شبعانة"
+                        description = "ما تحتاج أكل زيادة هسه."
+                    elif block_reason == "starving":
+                        title = "🚨 الجوع أولاً"
+                        description = "أطعمها قبل اللعب أو النزهة."
+                    else:
+                        title = "🪫 تحتاج نوم"
+                        description = "خليها ترتاح قبل اللعب أو النزهة."
+                    await update_cat(cat)
+                    card = await _build_guest_card(
+                        message,
+                        caller,
+                        cat,
+                        await get_user_points(user_id),
+                        "status",
+                    )
+                    result = InlineQueryResultArticle(
+                        id=f"guest-{action}-blocked",
+                        title=title,
+                        description=description,
+                        input_message_content=InputRichMessageContent(rich_message=card),
+                    )
+                    await message.bot.answer_guest_query(message.guest_query_id, result)
+                    return
+
+                timestamp_key = {
+                    "feed": "last_fed",
+                    "play": "last_played",
+                    "walk": "last_walk",
+                    "talk": "last_talk",
+                }[action]
+                cooldown = {
+                    "feed": settings.feed_cooldown,
+                    "play": settings.play_cooldown,
+                    "walk": settings.walk_cooldown,
+                    "talk": settings.talk_cooldown,
+                }[action]
+                last_action = cat.get(timestamp_key)
+                if last_action:
+                    ready, seconds_left = check_cooldown(
+                        parse_time(last_action),
+                        cooldown,
+                    )
+                else:
+                    ready, seconds_left = True, 0
+
+                need_bypass = can_bypass_action_cooldown(cat, action)
+                bypassed = not ready and need_bypass
+                if not ready and not need_bypass:
+                    await update_cat(cat)
+                    card = await _build_guest_card(
+                        message,
+                        caller,
+                        cat,
+                        await get_user_points(user_id),
+                        "status",
+                    )
+                    result = InlineQueryResultArticle(
+                        id=f"guest-{action}-cooldown",
+                        title="⏳ فترة تهدئة",
+                        description=f"ارجع بعد {max(1, seconds_left // 60)} دقيقة.",
+                        input_message_content=InputRichMessageContent(rich_message=card),
+                    )
+                    await message.bot.answer_guest_query(message.guest_query_id, result)
+                    return
+
+                apply_care_effects(cat, action)
+                cat[timestamp_key] = datetime.utcnow().isoformat()
+
+                if action == "feed":
+                    points = random.choice([0, 0, 2, 5, 8])
+                    title = "🍖 تم الإطعام"
+                elif action == "play":
+                    if int(cat.get("same_action_streak", 1)) >= 5:
+                        points = 0
+                        title = "😾 ملت من نفس اللعب"
+                    else:
+                        points = random.choice([0, 1, 3, 5, 10])
+                        title = "🎾 لعبت وياها"
+                elif action == "walk":
+                    points = random.choice([0, 2, 5, 10, 15])
+                    title = "🌿 طلعت نزهة"
+                else:
+                    points = random.choice([0, 1, 2, 4])
+                    title = "💬 حچيت وياها"
+
+                await update_cat(cat)
+                if points:
+                    balance = await award_points(user_id, points, action)
+                else:
+                    balance = await get_user_points(user_id)
+
+                description = (
+                    "⚡ التهدئة انفتحت لأنها كانت تحتاج هذا الفعل."
+                    if bypassed
+                    else cat["name"]
+                )
+                card = await _build_guest_card(
+                    message,
+                    caller,
+                    cat,
+                    balance,
+                    action,
+                )
                 result = InlineQueryResultArticle(
-                    id="guest-feed",
-                    title="معاينة الإطعام",
-                    description=f"{cat['name']} بعد الإطعام",
+                    id=f"guest-{action}",
+                    title=title,
+                    description=description,
                     input_message_content=InputRichMessageContent(rich_message=card),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
-            elif action == "play":
-                preview = dict(cat)
-                apply_care_effects(preview, "play")
-                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "play")
-                result = InlineQueryResultArticle(
-                    id="guest-play",
-                    title="معاينة اللعب",
-                    description=f"{cat['name']} بعد اللعب",
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            elif action == "walk":
-                preview = dict(cat)
-                apply_care_effects(preview, "walk")
-                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "walk")
-                result = InlineQueryResultArticle(
-                    id="guest-walk",
-                    title="معاينة النزهة",
-                    description=f"{cat['name']} بعد النزهة",
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
-            elif action == "talk":
-                preview = dict(cat)
-                apply_care_effects(preview, "talk")
-                card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "talk")
-                result = InlineQueryResultArticle(
-                    id="guest-talk",
-                    title="التحدث مع القطة",
-                    description=cat["name"],
-                    input_message_content=InputRichMessageContent(rich_message=card),
-                )
-                await message.bot.answer_guest_query(message.guest_query_id, result)
-                return
+
             elif action == "sleep":
-                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "sleep")
+                if is_sleeping(cat):
+                    title = "😴 القطة نائمة أصلًا"
+                    description = cat["name"]
+                else:
+                    rest_now = sleep_need_percent(cat)
+                    if rest_now >= 98:
+                        title = "😺 ما تحتاج تنام"
+                        description = "طاقتها وراحتها شبه كاملة."
+                    else:
+                        start_sleep(cat)
+                        await update_cat(cat)
+                        title = "💤 نامت القطة"
+                        description = (
+                            "كانت منهكة ونامت بسرعة."
+                            if rest_now <= 25
+                            else cat["name"]
+                        )
+                card = await _build_guest_card(
+                    message,
+                    caller,
+                    cat,
+                    await get_user_points(user_id),
+                    "sleep" if is_sleeping(cat) else "status",
+                )
                 result = InlineQueryResultArticle(
                     id="guest-sleep",
-                    title="نوم القطة",
-                    description=cat["name"],
+                    title=title,
+                    description=description,
                     input_message_content=InputRichMessageContent(rich_message=card),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
+
             elif action == "wake":
-                card = await _build_guest_card(message, caller, cat, await get_user_points(user_id), "status")
+                if is_sleeping(cat):
+                    rest_before_wake = sleep_need_percent(cat)
+                    if wake_now(cat):
+                        trust_loss = 0
+                        if rest_before_wake < 30:
+                            trust_loss = 3
+                        elif rest_before_wake < 50:
+                            trust_loss = 2
+                        elif rest_before_wake < 70:
+                            trust_loss = 1
+                        if trust_loss:
+                            cat["trust"] = max(
+                                0,
+                                int(cat.get("trust", 60)) - trust_loss,
+                            )
+                    await update_cat(cat)
+                    title = "☀️ صحت القطة"
+                    description = (
+                        "صحّيتها بدري، فثقتها نزلت شوي."
+                        if rest_before_wake < 70
+                        else cat["name"]
+                    )
+                else:
+                    title = "😺 القطة صاحية أصلًا"
+                    description = cat["name"]
+
+                card = await _build_guest_card(
+                    message,
+                    caller,
+                    cat,
+                    await get_user_points(user_id),
+                    "status",
+                )
                 result = InlineQueryResultArticle(
                     id="guest-wake",
-                    title="إيقاظ القطة",
-                    description=cat["name"],
+                    title=title,
+                    description=description,
                     input_message_content=InputRichMessageContent(rich_message=card),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
