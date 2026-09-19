@@ -16,7 +16,8 @@ from bot.services.local_store import (
     apply_decay,
     award_points,
     clear_action_notice,
-    can_bypass_feed_cooldown,
+    action_block_reason,
+    can_bypass_action_cooldown,
     ensure_user,
     finish_sleep,
     get_user_cat,
@@ -145,99 +146,40 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await query.answer()
         return
 
-    if action == "wake" and is_sleeping(cat):
-        rest_now = sleep_need_percent(cat)
-        attempts = int(cat.get("wake_attempts", 0))
-        should_refuse = (
-            (rest_now < 30 and attempts == 0)
-            or (30 <= rest_now < 50 and random.random() < 0.20)
-        )
-        if should_refuse:
-            notice_token = _set_action_notice(
-                cat,
-                "😾 بعدني تعبانة، خليني أنام شوي بعد!",
-            )
-            cat["wake_attempts"] = attempts + 1
-            await update_cat(cat)
-            await _edit_card(
-                query,
-                await _build_card(
-                    query,
-                    cat,
-                    await get_user_points(user_id),
-                    "cat_angry_sleep",
-                ),
-            )
-            await query.answer()
-            _schedule_notice_clear(query, user_id, notice_token)
-            return
-
-    refusal_until = cat.get("action_refusal_until")
-    if (
-        refusal_until
-        and datetime.utcnow().timestamp() < refusal_until
-        and action in {"play", "walk"}
-    ):
-        notice_token = _set_action_notice(
-            cat,
-            "😾 القطة مرهقة، خليها ترتاح شوي قبل اللعب أو النزهة.",
-        )
+    block_reason = action_block_reason(cat, action)
+    if block_reason:
         await update_cat(cat)
-        await _edit_card(
-            query,
-            await _build_card(query, 
-                cat,
-                await get_user_points(user_id),
-                "cat_angry_sleep",
-            ),
-        )
-        await query.answer()
-        _schedule_notice_clear(query, user_id, notice_token)
-        return
-
-    if refusal_until:
-        cat.pop("action_refusal_until", None)
-    elif (
-        sleep_need_percent(cat) <= 20
-        and action in {"play", "walk"}
-    ):
-        notice_token = _set_action_notice(
-            cat,
-            "😾 القطة مرهقة وتحتاج النوم!",
-        )
-        cat["action_refusal_until"] = (
-            datetime.utcnow().timestamp() + random.randint(120, 300)
-        )
-        await update_cat(cat)
-        await _edit_card(
-            query,
-            await _build_card(query, 
-                cat,
-                await get_user_points(user_id),
-                "cat_angry_sleep",
-            ),
-        )
-        await query.answer()
-        _schedule_notice_clear(query, user_id, notice_token)
-        return
-
-    media_kind = action
-    notice_token: str | None = None
-
-    if action == "feed":
-        if int(cat.get("hunger", 20)) <= 15:
+        if block_reason == "full":
             await query.answer(
                 "😺 القطة شبعانة هسه وما تحتاج أكل زيادة.",
                 show_alert=True,
             )
-            return
+        elif block_reason == "starving":
+            await query.answer(
+                "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.",
+                show_alert=True,
+            )
+        else:
+            await query.answer(
+                "🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.",
+                show_alert=True,
+            )
+        return
+
+    media_kind = action
+    notice_token: str | None = None
+    bypassed_cooldown = False
+
+    if action == "feed":
         ready, left = check_cooldown(
             parse_time(cat["last_fed"]),
             settings.feed_cooldown,
         )
-        if not ready and not can_bypass_feed_cooldown(cat):
+        need_bypass = can_bypass_action_cooldown(cat, "feed")
+        bypassed_cooldown = not ready and need_bypass
+        if not ready and not need_bypass:
             await query.answer(
-                f"الإطعام متاح بعد {left // 60} دقيقة.",
+                f"الإطعام متاح بعد {max(1, left // 60)} دقيقة.",
                 show_alert=True,
             )
             return
@@ -250,7 +192,9 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             parse_time(cat["last_played"]),
             settings.play_cooldown,
         )
-        if not ready:
+        need_bypass = can_bypass_action_cooldown(cat, "play")
+        bypassed_cooldown = not ready and need_bypass
+        if not ready and not need_bypass:
             await query.answer(
                 f"😼 شبعت لعب هسه، جرّب بعد {max(1, left // 60)} دقيقة.",
                 show_alert=True,
@@ -278,7 +222,9 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             parse_time(cat["last_walk"]),
             settings.walk_cooldown,
         )
-        if not ready:
+        need_bypass = can_bypass_action_cooldown(cat, "walk")
+        bypassed_cooldown = not ready and need_bypass
+        if not ready and not need_bypass:
             await query.answer(
                 f"🌿 توها طالعة نزهة، جرّب بعد {max(1, left // 60)} دقيقة.",
                 show_alert=True,
@@ -295,12 +241,16 @@ async def handle_rich_action(query: CallbackQuery) -> None:
                 parse_time(last_talk),
                 settings.talk_cooldown,
             )
-            if not ready:
-                await query.answer(
-                    f"خليها تستوعب الحچي شوي 😺 ارجع بعد {max(1, left // 60)} دقيقة.",
-                    show_alert=True,
-                )
-                return
+        else:
+            ready, left = True, 0
+        need_bypass = can_bypass_action_cooldown(cat, "talk")
+        bypassed_cooldown = not ready and need_bypass
+        if not ready and not need_bypass:
+            await query.answer(
+                f"خليها تستوعب الحچي شوي 😺 ارجع بعد {max(1, left // 60)} دقيقة.",
+                show_alert=True,
+            )
+            return
         apply_care_effects(cat, "talk")
         cat["last_talk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 1, 2, 4])
@@ -368,6 +318,12 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     else:
         return
+
+    if bypassed_cooldown and not notice_token:
+        notice_token = _set_action_notice(
+            cat,
+            "⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل.",
+        )
 
     balance = await get_user_points(user_id)
     if points:
