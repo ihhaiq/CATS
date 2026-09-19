@@ -72,6 +72,24 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الشبع", card.html)
         self.assertNotIn("الجوع:", card.html)
 
+    def test_rich_card_escapes_user_cat_name(self) -> None:
+        cat = {
+            "name": "<b>Test</b>",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "123456",
+            "hunger": 20,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "slept_today_hours": 0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("&lt;b&gt;Test&lt;/b&gt;", card.html)
+        self.assertNotIn("<h2><b>Test</b></h2>", card.html)
+
     def test_sleeping_card_hides_care_actions(self) -> None:
         from datetime import datetime, timedelta
 
