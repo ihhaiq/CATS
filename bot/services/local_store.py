@@ -458,9 +458,14 @@ def collect_needs(cat: dict) -> list[str]:
         elif rest <= 50:
             needs.append("sleepy")
 
-    walk_hours = _walk_hours(cat, datetime.utcnow())
+    moment = datetime.utcnow()
+    walk_hours = _walk_hours(cat, moment)
     if walk_hours >= WALK_DUE_HOURS and happiness <= 80:
         needs.append("walk_due")
+
+    social_hours = _social_hours(cat, moment)
+    if social_hours >= 10 and 25 <= boredom < 35:
+        needs.append("attention_due")
 
     if boredom >= 85:
         needs.append("very_bored")
