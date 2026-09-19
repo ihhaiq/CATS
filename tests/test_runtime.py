@@ -66,9 +66,11 @@ class RuntimeTests(unittest.TestCase):
         }
         card = asyncio.run(build_rich_card(None, cat, 42))
         self.assertIn("الشبع", card.html)
-        self.assertIn("الراحة والنوم", card.html)
+        self.assertIn("الراحة", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
+        self.assertIn("الشبع", card.html)
+        self.assertNotIn("الجوع:", card.html)
 
     def test_local_store_creates_and_updates_json(self) -> None:
         from bot.config import settings
