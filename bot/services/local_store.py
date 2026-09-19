@@ -56,6 +56,27 @@ def is_sleeping(cat: dict) -> bool:
     return bool(sleep_until and parse_time(sleep_until) > datetime.utcnow())
 
 
+def sleep_remaining_minutes(cat: dict) -> int:
+    sleep_until = cat.get("sleep_until")
+    if not sleep_until:
+        return 0
+    seconds = max(
+        0.0,
+        (parse_time(sleep_until) - datetime.utcnow()).total_seconds(),
+    )
+    return int((seconds + 59) // 60)
+
+
+def sleep_duration_text(minutes: int) -> str:
+    minutes = max(1, int(minutes))
+    if minutes < 60:
+        return f"{minutes} دقيقة"
+    hours, remainder = divmod(minutes, 60)
+    if remainder:
+        return f"{hours} ساعة و{remainder} دقيقة"
+    return f"{hours} ساعة"
+
+
 REST_FALL_PER_AWAKE_HOUR = 8.0
 REST_RECOVERY_PER_SLEEP_HOUR = 10.0
 HUNGER_RISE_PER_AWAKE_HOUR = 3.0
@@ -198,6 +219,8 @@ def start_sleep(cat: dict) -> int:
     # Starting a new session means any older undelivered wake event is stale.
     cat.pop("wake_notice_pending", None)
     cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
 
     cat["sleep_started_at"] = now.isoformat()
     cat["sleep_until"] = (now + timedelta(hours=hours)).isoformat()
@@ -225,6 +248,7 @@ def finish_sleep(cat: dict) -> bool:
     cat["wake_notice_pending"] = True
     cat["wake_notice_kind"] = kind
     cat["wake_notice_at"] = now.isoformat()
+    cat["wake_notice_sent_to"] = []
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
@@ -253,6 +277,7 @@ def wake_now(cat: dict) -> bool:
     cat.pop("wake_notice_pending", None)
     cat.pop("wake_notice_kind", None)
     cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
     return True
