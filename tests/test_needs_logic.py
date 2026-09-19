@@ -3,6 +3,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.services.local_store import (
+    _effective_slept_today,
     action_block_reason,
     apply_care_effects,
     apply_decay,
@@ -229,6 +230,45 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertFalse(cat.get("wake_notice_pending", False))
         self.assertIsNone(cat["sleep_until"])
 
+    def test_main_sleep_wakes_early_when_rest_is_full(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 90
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=2)).isoformat()
+        cat["sleep_planned_hours"] = 3.0
+        cat["sleep_kind"] = "main"
+        self.assertTrue(finish_sleep(cat))
+        self.assertIsNone(cat["sleep_until"])
+        self.assertEqual(cat["wake_notice_kind"], "main")
+
+    def test_nap_waits_for_its_real_end_time(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 95
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now + timedelta(minutes=30)).isoformat()
+        cat["sleep_planned_hours"] = 1.5
+        cat["sleep_kind"] = "nap"
+        self.assertFalse(finish_sleep(cat))
+        self.assertIsNotNone(cat["sleep_until"])
+
+    def test_active_sleep_counts_only_hours_from_current_day(self) -> None:
+        cat = old_cat(0)
+        previous_day = datetime(2026, 1, 1, 23, 0, 0)
+        current_day = datetime(2026, 1, 2, 2, 0, 0)
+        cat["sleep_day"] = "2026-01-01"
+        cat["slept_today_hours"] = 10.0
+        cat["sleep_started_at"] = previous_day.isoformat()
+        cat["sleep_until"] = datetime(2026, 1, 2, 3, 0, 0).isoformat()
+        self.assertAlmostEqual(
+            _effective_slept_today(cat, current_day),
+            2.0,
+            places=3,
+        )
+
     def test_hungry_cat_bypasses_feed_cooldown(self) -> None:
         cat = old_cat(0)
         cat["hunger"] = 69
@@ -308,6 +348,16 @@ class CoupledNeedsTests(unittest.TestCase):
         mild = notification_gap_seconds(["peckish"])
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
+
+    def test_optional_care_without_real_need_has_no_reward(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 100
+        cat["love_bar"] = 100
+        cat["trust"] = 100
+        cat["boredom"] = 0
+        apply_care_effects(cat, "talk")
+        self.assertFalse(cat["last_care_meaningful"])
+        self.assertEqual(care_reward_points(cat, "talk"), 0)
 
     def test_need_bypass_never_awards_points(self) -> None:
         cat = old_cat(0)
