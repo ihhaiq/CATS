@@ -8,7 +8,7 @@ from aiogram import Router
 from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
 
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import apply_decay, ensure_user, finish_sleep, get_user_cat, update_cat
+from bot.services.local_store import apply_care_effects, apply_decay, ensure_user, finish_sleep, get_user_cat, update_cat
 from bot.services.local_store import create_cat, now_iso
 from bot.services.local_store import get_user_points
 from bot.services.rich_card import build_rich_card
@@ -230,6 +230,8 @@ async def guest_message(message: Message) -> None:
                 "slept_today_hours": 10.0,
                 "sleep_until": None,
                 "last_wake_at": stamp,
+                "rest_level": 100,
+                "rest_updated_at": stamp,
             }
             await create_cat(cat)
             text = (
@@ -246,8 +248,8 @@ async def guest_message(message: Message) -> None:
             text = "🐾 ما عندك قطة بعد. افتح محادثة البوت وأرسل /تبني اسم_القطة أولاً."
             title = "لا توجد قطة"
         else:
-            finish_sleep(cat)
             apply_decay(cat)
+            finish_sleep(cat)
             await update_cat(cat)
             if action == "status":
                 result = InlineQueryResultArticle(
@@ -268,7 +270,7 @@ async def guest_message(message: Message) -> None:
                 return
             if action == "feed":
                 preview = dict(cat)
-                preview["hunger"] = max(0, preview["hunger"] - 30)
+                apply_care_effects(preview, "feed")
                 card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "feed")
                 result = InlineQueryResultArticle(
                     id="guest-feed",
@@ -280,7 +282,7 @@ async def guest_message(message: Message) -> None:
                 return
             elif action == "play":
                 preview = dict(cat)
-                preview["happiness"] = min(100, preview["happiness"] + 25)
+                apply_care_effects(preview, "play")
                 card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "play")
                 result = InlineQueryResultArticle(
                     id="guest-play",
@@ -292,7 +294,7 @@ async def guest_message(message: Message) -> None:
                 return
             elif action == "walk":
                 preview = dict(cat)
-                preview["happiness"] = min(100, preview["happiness"] + 15)
+                apply_care_effects(preview, "walk")
                 card = await _build_guest_card(message, caller, preview, await get_user_points(user_id), "walk")
                 result = InlineQueryResultArticle(
                     id="guest-walk",
