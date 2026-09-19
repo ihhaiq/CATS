@@ -843,7 +843,11 @@ async def get_user_cat(user_id: int) -> dict | None:
         return next((cat for cat in data["cats"] if cat["owner_id"] == user_id and not cat["is_fled"]), None)
 
 
-async def get_cat_by_id(cat_id: int) -> dict | None:
+async def get_cat_by_id(
+    cat_id: int,
+    *,
+    include_fled: bool = False,
+) -> dict | None:
     async with _lock:
         data = _read()
         return next(
@@ -851,10 +855,25 @@ async def get_cat_by_id(cat_id: int) -> dict | None:
                 cat
                 for cat in data["cats"]
                 if int(cat.get("cat_id", 0)) == int(cat_id)
-                and not cat.get("is_fled")
+                and (include_fled or not cat.get("is_fled"))
             ),
             None,
         )
+
+
+async def get_latest_cat_for_user(
+    user_id: int,
+    *,
+    include_fled: bool = True,
+) -> dict | None:
+    async with _lock:
+        cats = [
+            cat
+            for cat in _read()["cats"]
+            if int(cat.get("owner_id", 0)) == int(user_id)
+            and (include_fled or not cat.get("is_fled"))
+        ]
+        return max(cats, key=lambda cat: int(cat.get("cat_id", 0))) if cats else None
 
 
 async def get_active_cats() -> list[dict]:
