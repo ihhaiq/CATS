@@ -84,6 +84,13 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
 async def _wake_sweep(bot: Bot) -> None:
    async with _sweep_lock:
       for snapshot in await get_active_cats():
+         # The minute-level wake check should be almost free for awake cats.
+         sleep_until = snapshot.get("sleep_until")
+         expired = bool(sleep_until and not is_sleeping(snapshot))
+         pending = bool(snapshot.get("wake_notice_pending"))
+         if not expired and not pending:
+            continue
+
          owner_id = int(snapshot["owner_id"])
          async with user_action_lock(owner_id):
             # Reload after acquiring the user lock so we never overwrite a
@@ -95,11 +102,19 @@ async def _wake_sweep(bot: Bot) -> None:
             )
             if cat is None:
                continue
-            apply_decay(cat)
-            woke = finish_sleep(cat)
-            if woke:
-               cat["last_notified_state"] = None
-               cat["last_notified_at"] = None
+
+            sleep_until = cat.get("sleep_until")
+            expired = bool(sleep_until and not is_sleeping(cat))
+            pending = bool(cat.get("wake_notice_pending"))
+            if not expired and not pending:
+               continue
+
+            if expired:
+               apply_decay(cat)
+               woke = finish_sleep(cat)
+               if woke:
+                  cat["last_notified_state"] = None
+                  cat["last_notified_at"] = None
             await _send_wake_notice(bot, cat)
             await update_cat(cat)
 
