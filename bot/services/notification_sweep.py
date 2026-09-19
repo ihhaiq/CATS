@@ -17,6 +17,7 @@ from bot.services.local_store import (
    finish_sleep,
    get_active_cats,
    is_sleeping,
+   notification_gap_seconds,
    update_cat,
 )
 
@@ -25,13 +26,22 @@ _fallback_task: asyncio.Task | None = None
 logger = logging.getLogger("catibot.notification_sweep")
 
 _NEED_MESSAGES = {
-   "hungry": "🍖 جائعة وتحتاج أكل",
-   "tired": "😴 مرهقة وتحتاج نوم",
-   "walk_due": "🚶 محتاجة نزهة وتغيير جو",
-   "sad": "😿 حزينة وتحتاج لعب واهتمام",
-   "love_low": "🥺 حبها ورابطتها وياك نازلة وتحتاج رعاية",
-   "trust_low": "🤝 ثقتها بيك نازلة وتحتاج رعاية ثابتة وهادئة",
-   "bored": "🌀 ملّت وتحتاج لعب أو حديث وتغيير بالروتين",
+   "love_critical": "💔 حبها ورابطتها وياك صارت بحالة حرجة وتحتاج اهتمام حقيقي.",
+   "love_low": "🥺 حست بالإهمال وحبها إلك بدأ ينزل.",
+   "trust_critical": "🧊 ثقتها بيك صارت ضعيفة جداً؛ تحتاج رعاية ثابتة وبدون إزعاج.",
+   "trust_low": "🤝 ثقتها بيك نازلة وتحتاج تعامل ثابت وهادئ.",
+   "starving": "🚨🍖 جوعها صار شديد جداً، أطعمها بأقرب وقت.",
+   "hungry": "🍗 قطتك جائعة وتدور على أكل.",
+   "peckish": "🥣 بدت تجوع شوي، قريب راح تحتاج أكل.",
+   "exhausted": "🪫 قطتك منهكة جداً وتحتاج نوم طويل.",
+   "tired": "😴 تعبت وتحتاج ترتاح وتنام.",
+   "sleepy": "🥱 بدت تنعس؛ طاقتها قاعدة تنزل.",
+   "walk_due": "🌿 ضاقت من القعدة وتحتاج نزهة وتغيير جو.",
+   "very_bored": "🙀 الملل عندها صار شديد؛ تريد لعب أو حديث وتغيير بالروتين.",
+   "bored": "🌀 قطتك حست بالملل وتريد تسوي شي وياك.",
+   "restless": "😼 بدت تمل وتدور شي يشغلها.",
+   "very_sad": "💔😿 حزينة جداً وحالتها النفسية نازلة.",
+   "sad": "😿 مزاجها مو زين وتحتاج اهتمام.",
 }
 
 
@@ -51,15 +61,28 @@ async def _sweep(bot: Bot) -> None:
       needs = collect_needs(cat)
       state = "|".join(needs) if needs else None
       last_at = cat.get("last_notified_at")
+      gap = notification_gap_seconds(needs)
       enough_gap = (
          not last_at
          or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds()
-         >= settings.notification_min_gap
+         >= gap
       )
 
       if state and (state != cat.get("last_notified_state") or enough_gap):
          details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in needs)
-         message = f"🐾 قطتك تحتاجك هسه:\n{details}"
+         urgent = any(
+            item in {
+               "love_critical",
+               "trust_critical",
+               "starving",
+               "exhausted",
+               "very_bored",
+               "very_sad",
+            }
+            for item in needs
+         )
+         header = "🚨 قطتك تحتاجك هسه:" if urgent else "🐾 تحديث حالة قطتك:"
+         message = f"{header}\n{details}"
          for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
             try:
                await bot.send_message(user_id, message)
