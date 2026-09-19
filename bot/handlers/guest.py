@@ -23,6 +23,7 @@ from bot.services.local_store import (
     is_sleeping,
     now_iso,
     parse_time,
+    sleep_duration_text,
     sleep_need_percent,
     start_sleep,
     update_cat,
@@ -441,14 +442,15 @@ async def guest_message(message: Message) -> None:
                         title = "😺 ما تحتاج تنام"
                         description = "طاقتها وراحتها شبه كاملة."
                     else:
-                        start_sleep(cat)
+                        planned_minutes = start_sleep(cat)
                         await update_cat(cat)
-                        title = "💤 نامت القطة"
-                        description = (
-                            "كانت منهكة ونامت بسرعة."
-                            if rest_now <= 25
-                            else cat["name"]
-                        )
+                        duration = sleep_duration_text(planned_minutes)
+                        if cat.get("sleep_kind") == "main":
+                            title = "😴 نامت القطة"
+                            description = f"نوم رئيسي، تقريباً {duration}."
+                        else:
+                            title = "💤 أخذت قيلولة"
+                            description = f"قيلولة، تقريباً {duration}."
                 card = await _build_guest_card(
                     message,
                     caller,
