@@ -65,7 +65,13 @@ BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
 TRUST_FALL_PER_NEGLECT_HOUR = 0.7
 WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
-HEALTHY_SLEEP_HOURS = 8.0
+CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
+HEALTHY_SLEEP_HOURS = 16.0
+MAIN_SLEEP_REST_THRESHOLD = 35
+MAIN_SLEEP_MIN_HOURS = 4.0
+MAIN_SLEEP_MAX_HOURS = 10.0
+NAP_MIN_HOURS = 0.75
+NAP_MAX_HOURS = 2.5
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -150,30 +156,59 @@ def wake_if_ready(cat: dict) -> bool:
     return False
 
 
-def start_sleep(cat: dict) -> int:
-    now = datetime.utcnow()
+def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
+    """Plan a real-time main sleep or nap from rest deficit and today's sleep."""
+    now = moment or datetime.utcnow()
     rest = _refresh_rest(cat, now)
     today = now.date().isoformat()
-    if cat.get("sleep_day") != today:
+    if cat.get("sleep_day") != today and not is_sleeping(cat):
         cat["sleep_day"] = today
         cat["slept_today_hours"] = 0.0
 
     slept = _effective_slept_today(cat, now)
-    # Sleep duration follows the actual deficit. From 0% to 100% takes about
-    # 10 hours; from 50% it takes about 5 hours.
-    hours_needed = max(1.0, (100 - rest) / REST_RECOVERY_PER_SLEEP_HOUR)
-    if slept >= 10:
-        hours_needed = min(hours_needed, 1.5)
-    hours = min(10.0, hours_needed)
+    deficit_hours = max(
+        NAP_MIN_HOURS,
+        (100 - rest) / REST_RECOVERY_PER_SLEEP_HOUR,
+    )
+
+    # A deeply tired cat takes a real main sleep. Otherwise it takes one of
+    # several shorter naps, which is closer to a cat's normal daily rhythm.
+    if (
+        rest <= MAIN_SLEEP_REST_THRESHOLD
+        and slept < CAT_DAILY_SLEEP_TARGET_HOURS
+    ):
+        kind = "main"
+        hours = max(
+            MAIN_SLEEP_MIN_HOURS,
+            min(MAIN_SLEEP_MAX_HOURS, deficit_hours),
+        )
+    else:
+        kind = "nap"
+        hours = min(NAP_MAX_HOURS, max(NAP_MIN_HOURS, deficit_hours))
+        if slept >= CAT_DAILY_SLEEP_TARGET_HOURS:
+            hours = min(hours, 1.0)
+
+    return kind, hours
+
+
+def start_sleep(cat: dict) -> int:
+    now = datetime.utcnow()
+    kind, hours = sleep_plan(cat, now)
+
+    # Starting a new session means any older undelivered wake event is stale.
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
 
     cat["sleep_started_at"] = now.isoformat()
     cat["sleep_until"] = (now + timedelta(hours=hours)).isoformat()
     cat["sleep_planned_hours"] = hours
+    cat["sleep_kind"] = kind
     cat["rest_updated_at"] = now.isoformat()
     return round(hours * 60)
 
 
 def finish_sleep(cat: dict) -> bool:
+    """Finish only a naturally completed sleep session and queue a wake event."""
     if not cat.get("sleep_until") or is_sleeping(cat):
         return False
     now = datetime.utcnow()
@@ -184,9 +219,16 @@ def finish_sleep(cat: dict) -> bool:
         cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
             elapsed, float(cat.get("sleep_planned_hours", 0))
         )
+
+    kind = cat.get("sleep_kind") or "sleep"
+    cat["last_sleep_kind"] = kind
+    cat["wake_notice_pending"] = True
+    cat["wake_notice_kind"] = kind
+    cat["wake_notice_at"] = now.isoformat()
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
     return True
@@ -203,9 +245,14 @@ def wake_now(cat: dict) -> bool:
         cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
             elapsed, float(cat.get("sleep_planned_hours", 0))
         )
+    cat["last_sleep_kind"] = cat.get("sleep_kind") or "sleep"
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
     return True
