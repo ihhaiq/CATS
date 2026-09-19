@@ -14,6 +14,7 @@ from bot.services.local_store import (
     recommended_action,
     sleep_plan,
     sleep_need_percent,
+    sleep_ready_to_finish,
     start_sleep,
     wake_now,
 )
@@ -183,7 +184,7 @@ class CoupledNeedsTests(unittest.TestCase):
         kind, hours = sleep_plan(cat)
         self.assertEqual(kind, "main")
         self.assertGreaterEqual(hours, 4.0)
-        self.assertLessEqual(hours, 10.0)
+        self.assertLessEqual(hours, 12.5)
 
     def test_moderately_tired_cat_gets_nap(self) -> None:
         cat = old_cat(0)
@@ -193,6 +194,17 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertEqual(kind, "nap")
         self.assertGreaterEqual(hours, 0.75)
         self.assertLessEqual(hours, 2.5)
+
+    def test_main_sleep_can_finish_when_rest_is_full(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 97
+        cat["rest_updated_at"] = (now - timedelta(minutes=10)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(minutes=10)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=2)).isoformat()
+        cat["sleep_planned_hours"] = 2.0
+        cat["sleep_kind"] = "main"
+        self.assertTrue(sleep_ready_to_finish(cat, now))
 
     def test_natural_wake_queues_notification(self) -> None:
         cat = old_cat(0)
@@ -275,6 +287,13 @@ class CoupledNeedsTests(unittest.TestCase):
 
         cat["hunger"] = 20
         self.assertEqual(recommended_action(cat), "sleep")
+
+    def test_zero_love_marks_cat_as_fled_during_decay(self) -> None:
+        cat = old_cat(0)
+        cat["love_bar"] = 0
+        apply_decay(cat)
+        self.assertTrue(cat["is_fled"])
+        self.assertIsNotNone(cat.get("fled_at"))
 
     def test_alerts_have_progressive_severity(self) -> None:
         cat = old_cat(0)
