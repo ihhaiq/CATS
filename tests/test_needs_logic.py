@@ -12,6 +12,7 @@ from bot.services.local_store import (
     collect_needs,
     notification_gap_seconds,
     finish_sleep,
+    is_action_cooldown_bypassed,
     recommended_action,
     sleep_plan,
     sleep_need_percent,
@@ -358,6 +359,34 @@ class CoupledNeedsTests(unittest.TestCase):
         apply_care_effects(cat, "talk")
         self.assertFalse(cat["last_care_meaningful"])
         self.assertEqual(care_reward_points(cat, "talk"), 0)
+
+    def test_bypass_icon_state_requires_a_live_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 75
+        cat["last_fed"] = (
+            datetime.utcnow() - timedelta(minutes=5)
+        ).isoformat()
+        self.assertTrue(is_action_cooldown_bypassed(cat, "feed"))
+
+        cat["last_fed"] = (
+            datetime.utcnow() - timedelta(minutes=20)
+        ).isoformat()
+        self.assertFalse(is_action_cooldown_bypassed(cat, "feed"))
+
+    def test_natural_wake_resets_old_need_notification_state(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["last_notified_state"] = "hungry"
+        cat["last_notified_at"] = now.isoformat()
+        cat["rest_level"] = 50
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_planned_hours"] = 1.0
+        cat["sleep_kind"] = "nap"
+        self.assertTrue(finish_sleep(cat))
+        self.assertIsNone(cat["last_notified_state"])
+        self.assertIsNone(cat["last_notified_at"])
 
     def test_need_bypass_never_awards_points(self) -> None:
         cat = old_cat(0)
