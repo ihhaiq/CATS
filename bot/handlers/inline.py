@@ -4,13 +4,17 @@ from aiogram import Router
 from aiogram.types import InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
 from bot.services.local_store import (
+    action_block_reason,
     apply_care_effects,
     apply_decay,
     ensure_user,
     finish_sleep,
     fullness_percent,
     get_user_cat,
+    is_sleeping,
+    sleep_duration_text,
     sleep_need_percent,
+    sleep_remaining_minutes,
     update_cat,
     user_action_lock,
 )
@@ -70,18 +74,37 @@ async def inline_cat(inline_query: InlineQuery) -> None:
                 title = "💨 هربت قطتك"
                 text = "وصل الحب إلى 0 بسبب الإهمال، وما عادت أفعال العناية متاحة."
             elif action in {"feed", "play", "walk"}:
-                preview = dict(cat)
-                apply_care_effects(preview, action)
-                title = {
-                    "feed": "معاينة الإطعام",
-                    "play": "معاينة اللعب",
-                    "walk": "معاينة النزهة",
-                }[action]
-                icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
-                text = (
-                    f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n"
-                    + _state_text(preview)
-                )
+                if is_sleeping(cat):
+                    title = "😴 القطة نائمة"
+                    text = (
+                        "ما تگدر تسوي هذا الفعل هسه. باقي تقريباً "
+                        f"{sleep_duration_text(sleep_remaining_minutes(cat))}.\n"
+                        + _state_text(cat)
+                    )
+                else:
+                    block_reason = action_block_reason(cat, action)
+                    if block_reason:
+                        title = "الفعل مو مناسب هسه"
+                        reason = {
+                            "full": "😺 القطة شبعانة وما تحتاج أكل زيادة.",
+                            "starving": "🚨🍖 أطعمها أولاً قبل اللعب أو النزهة.",
+                            "tired": "🪫 خليها تنام قبل اللعب أو النزهة.",
+                            "bored_of_play": "😾 ملت من نفس اللعب؛ غيّر النشاط.",
+                        }.get(block_reason, "هذا الفعل مو مناسب لحالتها الحالية.")
+                        text = reason + "\n" + _state_text(cat)
+                    else:
+                        preview = dict(cat)
+                        apply_care_effects(preview, action)
+                        title = {
+                            "feed": "معاينة الإطعام",
+                            "play": "معاينة اللعب",
+                            "walk": "معاينة النزهة",
+                        }[action]
+                        icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
+                        text = (
+                            f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n"
+                            + _state_text(preview)
+                        )
             else:
                 title = "حالة قطتك"
                 text = _state_text(cat)
