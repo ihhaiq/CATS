@@ -58,12 +58,14 @@ def is_sleeping(cat: dict) -> bool:
 
 REST_FALL_PER_AWAKE_HOUR = 8.0
 REST_RECOVERY_PER_SLEEP_HOUR = 10.0
-BOREDOM_RISE_PER_AWAKE_HOUR = 1.25
-BOREDOM_RISE_PER_SLEEP_HOUR = 0.75
-TRUST_FALL_PER_NEGLECT_HOUR = 0.9
 HUNGER_RISE_PER_AWAKE_HOUR = 3.0
-HUNGER_RISE_PER_SLEEP_HOUR = 1.5
-WALK_DUE_HOURS = 18.0
+HUNGER_RISE_PER_SLEEP_HOUR = 1.0
+BOREDOM_RISE_PER_AWAKE_HOUR = 1.0
+BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
+TRUST_FALL_PER_NEGLECT_HOUR = 0.7
+WALK_DUE_HOURS = 14.0
+ROUTINE_WINDOW_HOURS = 6.0
+HEALTHY_SLEEP_HOURS = 8.0
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -78,10 +80,40 @@ def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
     return max(0.0, (overlap_end - overlap_start).total_seconds() / 3600)
 
 
+def _session_sleep_until(cat: dict, moment: datetime) -> float:
+    """Hours already slept in the current active sleep session by moment."""
+    started = cat.get("sleep_started_at")
+    until = cat.get("sleep_until")
+    if not started or not until:
+        return 0.0
+    sleep_start = parse_time(started)
+    sleep_end = min(moment, parse_time(until))
+    if sleep_end <= sleep_start:
+        return 0.0
+    return max(0.0, (sleep_end - sleep_start).total_seconds() / 3600)
+
+
+def _effective_slept_today(cat: dict, moment: datetime) -> float:
+    return float(cat.get("slept_today_hours", 0.0)) + _session_sleep_until(cat, moment)
+
+
+def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
+    """Only sleep beyond the healthy daily amount adds boredom."""
+    before = _effective_slept_today(cat, start)
+    after = _effective_slept_today(cat, end)
+    return max(0.0, after - HEALTHY_SLEEP_HOURS) - max(
+        0.0, before - HEALTHY_SLEEP_HOURS
+    )
+
+
 def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
-    """Keep a persistent rest meter: awake drains it, actual sleep restores it."""
+    """Persistent rest meter: awake drains quickly, sleep restores slowly."""
     moment = moment or datetime.utcnow()
-    anchor_raw = cat.get("rest_updated_at") or cat.get("last_wake_at") or cat.get("created_at")
+    anchor_raw = (
+        cat.get("rest_updated_at")
+        or cat.get("last_wake_at")
+        or cat.get("created_at")
+    )
     anchor = parse_time(anchor_raw) if anchor_raw else moment
     if anchor > moment:
         anchor = moment
@@ -89,7 +121,6 @@ def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
     if "rest_level" in cat:
         rest = float(cat.get("rest_level", 100))
     else:
-        # Backward compatible migration for cats created before rest_level existed.
         awake_hours = max(0.0, (moment - anchor).total_seconds() / 3600)
         rest = max(0.0, 100.0 - awake_hours * REST_FALL_PER_AWAKE_HOUR)
         anchor = moment
@@ -118,19 +149,24 @@ def wake_if_ready(cat: dict) -> bool:
 
 def start_sleep(cat: dict) -> int:
     now = datetime.utcnow()
-    _refresh_rest(cat, now)
+    rest = _refresh_rest(cat, now)
     today = now.date().isoformat()
     if cat.get("sleep_day") != today:
         cat["sleep_day"] = today
         cat["slept_today_hours"] = 0.0
-    remaining = max(0.5, 10.0 - float(cat.get("slept_today_hours", 0)))
-    import random
-    # A tired cat gets a longer useful sleep instead of many tiny random naps.
-    rest = int(cat.get("rest_level", 100))
-    target = 6.0 if rest <= 20 else 4.0 if rest <= 50 else 2.0
-    hours = min(remaining, max(0.5, target + random.uniform(-0.25, 0.5)))
+
+    slept = _effective_slept_today(cat, now)
+    # Sleep duration follows the actual deficit. From 0% to ~95% takes about
+    # 9.5 hours; from 50% it takes about 4.5 hours.
+    hours_needed = max(1.0, (95 - rest) / REST_RECOVERY_PER_SLEEP_HOUR)
+    if slept >= 10:
+        hours_needed = min(hours_needed, 1.5)
+    hours = min(10.0, hours_needed)
+
     cat["sleep_started_at"] = now.isoformat()
-    cat["sleep_until"] = datetime.fromtimestamp(now.timestamp() + hours * 3600).isoformat()
+    cat["sleep_until"] = datetime.fromtimestamp(
+        now.timestamp() + hours * 3600
+    ).isoformat()
     cat["sleep_planned_hours"] = hours
     cat["rest_updated_at"] = now.isoformat()
     return round(hours * 60)
@@ -180,171 +216,273 @@ def clear_action_notice(cat: dict) -> None:
     cat.pop("action_notice_token", None)
 
 
+def _walk_hours(cat: dict, moment: datetime) -> float:
+    value = cat.get("last_walk")
+    if not value:
+        return 0.0
+    return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
+
+
 def apply_decay(cat: dict) -> None:
-    """Advance all needs together so bad states reinforce each other."""
+    """Advance needs in small time slices so neglect is never backdated."""
     now = datetime.utcnow()
-    last_decay = parse_time(cat.get("last_decay_at") or cat.get("created_at") or cat["last_fed"])
-    hours = max(0.0, (now - last_decay).total_seconds() / 3600)
-    if hours <= 0:
+    last_decay = parse_time(
+        cat.get("last_decay_at") or cat.get("created_at") or cat["last_fed"]
+    )
+    elapsed = max(0.0, (now - last_decay).total_seconds() / 3600)
+    if elapsed <= 0:
         _refresh_rest(cat, now)
         return
 
-    asleep = min(hours, _sleep_overlap_hours(cat, last_decay, now))
-    awake = max(0.0, hours - asleep)
-    rest = _refresh_rest(cat, now)
+    rest_before = int(cat.get("rest_level", 100))
+    rest_after = _refresh_rest(cat, now)
 
-    old_hunger = float(cat.get("hunger", 0))
-    hunger = old_hunger + awake * HUNGER_RISE_PER_AWAKE_HOUR + asleep * HUNGER_RISE_PER_SLEEP_HOUR
-    cat["hunger"] = max(0, min(100, round(hunger)))
-
-    # Boredom is an unmet stimulation need. Being awake without interaction
-    # raises it, and oversleeping also raises it because the routine becomes flat.
+    hunger = float(cat.get("hunger", 20))
+    happiness = float(cat.get("happiness", 100))
+    love = float(cat.get("love_bar", 100))
+    trust = float(cat.get("trust", 60))
     boredom = float(cat.get("boredom", 10))
-    boredom += awake * BOREDOM_RISE_PER_AWAKE_HOUR
-    boredom += asleep * BOREDOM_RISE_PER_SLEEP_HOUR
-    repeated = int(cat.get("same_action_streak", 0))
-    if repeated >= 3:
-        boredom += hours * min(2.0, (repeated - 2) * 0.4)
+
+    cursor = last_decay
+    total_seconds = max(1.0, (now - last_decay).total_seconds())
+    while cursor < now:
+        step_end = min(now, datetime.fromtimestamp(cursor.timestamp() + 3600))
+        step_hours = (step_end - cursor).total_seconds() / 3600
+        asleep = min(step_hours, _sleep_overlap_hours(cat, cursor, step_end))
+        awake = max(0.0, step_hours - asleep)
+
+        progress = (step_end - last_decay).total_seconds() / total_seconds
+        rest = rest_before + (rest_after - rest_before) * progress
+
+        hunger = min(
+            100.0,
+            hunger
+            + awake * HUNGER_RISE_PER_AWAKE_HOUR
+            + asleep * HUNGER_RISE_PER_SLEEP_HOUR,
+        )
+
+        boredom += awake * BOREDOM_RISE_PER_AWAKE_HOUR
+        boredom += (
+            _oversleep_between(cat, cursor, step_end)
+            * BOREDOM_RISE_PER_OVERSLEEP_HOUR
+        )
+        boredom = min(100.0, boredom)
+
+        # Happiness is affected by actual current needs, not just elapsed time.
+        happiness_loss = awake * 0.6
+        if hunger >= 55:
+            happiness_loss += awake * 0.5
+        if hunger >= 75:
+            happiness_loss += awake * 0.8
+        if hunger >= 90:
+            happiness_loss += awake * 0.8
+        if rest <= 50:
+            happiness_loss += awake * 0.5
+        if rest <= 30:
+            happiness_loss += awake * 0.8
+        if rest <= 10:
+            happiness_loss += awake * 1.0
+        if boredom >= 50:
+            happiness_loss += awake * 0.5
+        if boredom >= 75:
+            happiness_loss += awake * 0.8
+        if _walk_hours(cat, step_end) >= WALK_DUE_HOURS:
+            happiness_loss += awake * 0.35
+        happiness = max(0.0, happiness - happiness_loss)
+
+        # Love starts dropping only after real neglect has begun.
+        love_severity = 0.0
+        if hunger >= 75:
+            love_severity += 0.35
+        if happiness <= 35:
+            love_severity += 0.30
+        if rest <= 20:
+            love_severity += 0.25
+        if boredom >= 85:
+            love_severity += 0.10
+        love -= step_hours * 0.9 * min(1.0, love_severity)
+        love = max(0.0, love)
+
+        # Trust is harder to lose and recover than mood/love. Only severe,
+        # sustained neglect damages it.
+        trust_severity = 0.0
+        if hunger >= 90:
+            trust_severity += 0.40
+        if rest <= 10:
+            trust_severity += 0.30
+        if happiness <= 20:
+            trust_severity += 0.20
+        if love <= 20:
+            trust_severity += 0.15
+        trust -= step_hours * TRUST_FALL_PER_NEGLECT_HOUR * min(
+            1.0, trust_severity
+        )
+        trust = max(0.0, trust)
+
+        cursor = step_end
+
+    cat["hunger"] = max(0, min(100, round(hunger)))
+    cat["happiness"] = max(0, min(100, round(happiness)))
+    cat["love_bar"] = max(0, min(100, round(love)))
+    cat["trust"] = max(0, min(100, round(trust)))
     cat["boredom"] = max(0, min(100, round(boredom)))
-
-    # Happiness falls slowly by itself, then faster when hunger, exhaustion or
-    # being kept indoors for too long starts to hurt the cat.
-    happiness_loss = awake * 1.0
-    avg_hunger = (old_hunger + cat["hunger"]) / 2
-    if avg_hunger >= 50:
-        happiness_loss += awake * 0.75
-    if avg_hunger >= 75:
-        happiness_loss += awake * 1.25
-    if rest <= 40:
-        happiness_loss += awake * 1.0
-    if rest <= 20:
-        happiness_loss += awake * 1.5
-    if cat["boredom"] >= 50:
-        happiness_loss += awake * 0.75
-    if cat["boredom"] >= 80:
-        happiness_loss += awake * 1.25
-
-    last_walk = cat.get("last_walk")
-    if last_walk:
-        walk_hours = max(0.0, (now - parse_time(last_walk)).total_seconds() / 3600)
-        if walk_hours >= WALK_DUE_HOURS:
-            happiness_loss += awake * 0.75
-
-    cat["happiness"] = max(0, min(100, round(float(cat.get("happiness", 100)) - happiness_loss)))
-
-    # Love is relationship health, not a clock. It only falls when actual
-    # neglect exists, and severe needs compound the loss.
-    severity = 0.0
-    if cat["hunger"] >= 75:
-        severity += 0.45
-    if cat["happiness"] <= 35:
-        severity += 0.35
-    if rest <= 20:
-        severity += 0.30
-    severity = min(1.0, severity)
-    if severity:
-        cat["love_bar"] = max(
-            0,
-            min(100, round(float(cat.get("love_bar", 100)) - hours * 1.2 * severity)),
-        )
-
-    # Trust is slower and more structural than love: severe neglect teaches the
-    # cat that care is unreliable. Ordinary passing time does not lower it.
-    trust_severity = 0.0
-    if cat["hunger"] >= 85:
-        trust_severity += 0.45
-    if rest <= 10:
-        trust_severity += 0.35
-    if cat["happiness"] <= 20:
-        trust_severity += 0.25
-    if cat["love_bar"] <= 25:
-        trust_severity += 0.20
-    if trust_severity:
-        cat["trust"] = max(
-            0,
-            min(
-                100,
-                round(
-                    float(cat.get("trust", 60))
-                    - hours * TRUST_FALL_PER_NEGLECT_HOUR * min(1.0, trust_severity)
-                ),
-            ),
-        )
-    else:
-        cat["trust"] = max(0, min(100, int(cat.get("trust", 60))))
-
     cat["last_decay_at"] = now.isoformat()
 
 
-def apply_care_effects(cat: dict, action: str) -> None:
-    """Apply care and relationship effects consistently across every surface."""
+def _routine_streak(cat: dict, action: str, moment: datetime) -> int:
     previous = cat.get("last_care_action")
-    streak = int(cat.get("same_action_streak", 0))
-    if previous == action:
-        streak += 1
-    else:
-        streak = 1
+    previous_at = cat.get("last_care_at")
+    recent = False
+    if previous_at:
+        recent = (
+            moment - parse_time(previous_at)
+        ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
+
+    if previous == action and recent:
+        return int(cat.get("same_action_streak", 0)) + 1
+    return 1
+
+
+def apply_care_effects(cat: dict, action: str) -> None:
+    """Apply care; useful variety builds trust, mindless repetition does not."""
+    moment = datetime.utcnow()
+    streak = _routine_streak(cat, action, moment)
     cat["last_care_action"] = action
     cat["same_action_streak"] = streak
+    cat["last_care_at"] = moment.isoformat()
 
     boredom = int(cat.get("boredom", 10))
     trust = int(cat.get("trust", 60))
+    hunger_before = int(cat.get("hunger", 20))
+    happiness_before = int(cat.get("happiness", 100))
 
+    meaningful = True
     if action == "feed":
-        cat["hunger"] = max(0, int(cat["hunger"]) - 40)
-        cat["happiness"] = min(100, int(cat["happiness"]) + 8)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 3)
-        cat["trust"] = min(100, trust + 3)
-        # Food fixes hunger, not boredom. Repeating only food becomes routine.
-        if streak >= 3:
-            cat["boredom"] = min(100, boredom + 3)
+        meaningful = hunger_before >= 35
+        cat["hunger"] = max(0, hunger_before - 40)
+        cat["happiness"] = min(100, happiness_before + (8 if meaningful else 3))
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + (3 if meaningful else 1))
+        if streak >= 3 and not meaningful:
+            cat["boredom"] = min(100, boredom + 4)
     elif action == "play":
-        cat["happiness"] = min(100, int(cat["happiness"]) + 25)
+        meaningful = boredom >= 20 or happiness_before <= 80
+        cat["happiness"] = min(100, happiness_before + 24)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + 5)
-        cat["trust"] = min(100, trust + 2)
         cat["boredom"] = max(0, boredom - 35)
-        cat["hunger"] = min(100, int(cat["hunger"]) + 7)
+        cat["hunger"] = min(100, hunger_before + 7)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
     elif action == "walk":
-        cat["happiness"] = min(100, int(cat["happiness"]) + 22)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 8)
-        cat["trust"] = min(100, trust + 4)
-        cat["boredom"] = max(0, boredom - 12)
-        cat["hunger"] = min(100, int(cat["hunger"]) + 10)
+        meaningful = boredom >= 25 or _walk_hours(cat, moment) >= 8
+        cat["happiness"] = min(100, happiness_before + 20)
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + 7)
+        cat["boredom"] = max(0, boredom - 22)
+        cat["hunger"] = min(100, hunger_before + 10)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 12)
     elif action == "talk":
-        cat["happiness"] = min(100, int(cat["happiness"]) + 8)
+        meaningful = boredom >= 15 or happiness_before <= 85 or trust <= 65
+        cat["happiness"] = min(100, happiness_before + 7)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + 3)
-        cat["trust"] = min(100, trust + 3)
-        cat["boredom"] = max(0, boredom - 28)
+        cat["boredom"] = max(0, boredom - 25)
+        cat["last_social_at"] = moment.isoformat()
+    else:
+        return
 
-    # Repeating the exact same interaction too many times makes it less novel.
+    if action in {"play", "walk"}:
+        cat["last_social_at"] = moment.isoformat()
+
+    trust_gain = {"feed": 2, "play": 2, "walk": 3, "talk": 2}[action]
+    if not meaningful:
+        trust_gain = 0
+    elif streak >= 3:
+        trust_gain = max(0, trust_gain - (streak - 2))
+    cat["trust"] = min(100, trust + trust_gain)
+
+    # Repeating one interaction inside a short window becomes less stimulating.
     if action in {"play", "talk", "walk"} and streak >= 4:
-        cat["boredom"] = min(100, int(cat.get("boredom", 0)) + min(12, (streak - 3) * 3))
+        cat["boredom"] = min(
+            100,
+            int(cat.get("boredom", 0)) + min(15, (streak - 3) * 4),
+        )
 
 
 def collect_needs(cat: dict) -> list[str]:
-    """Return every currently unmet need, ordered from most urgent."""
+    """One severity tier per need, ordered from relationship to physical needs."""
     needs: list[str] = []
     rest = sleep_need_percent(cat)
-    if int(cat.get("love_bar", 100)) <= 20:
+    hunger = int(cat.get("hunger", 20))
+    happiness = int(cat.get("happiness", 100))
+    love = int(cat.get("love_bar", 100))
+    trust = int(cat.get("trust", 60))
+    boredom = int(cat.get("boredom", 10))
+
+    if love <= 12:
+        needs.append("love_critical")
+    elif love <= 30:
         needs.append("love_low")
-    if int(cat.get("trust", 60)) <= 25:
+
+    if trust <= 15:
+        needs.append("trust_critical")
+    elif trust <= 35:
         needs.append("trust_low")
-    if int(cat.get("hunger", 0)) >= settings.hunger_alert_threshold:
+
+    if hunger >= 90:
+        needs.append("starving")
+    elif hunger >= settings.hunger_alert_threshold:
         needs.append("hungry")
-    if rest <= 30 and not is_sleeping(cat):
-        needs.append("tired")
-    last_walk = cat.get("last_walk")
-    if last_walk:
-        walk_hours = max(0.0, (datetime.utcnow() - parse_time(last_walk)).total_seconds() / 3600)
-        if walk_hours >= WALK_DUE_HOURS and int(cat.get("happiness", 100)) <= 70:
-            needs.append("walk_due")
-    if int(cat.get("boredom", 10)) >= 75:
+    elif hunger >= 55:
+        needs.append("peckish")
+
+    if not is_sleeping(cat):
+        if rest <= 10:
+            needs.append("exhausted")
+        elif rest <= 30:
+            needs.append("tired")
+        elif rest <= 50:
+            needs.append("sleepy")
+
+    walk_hours = _walk_hours(cat, datetime.utcnow())
+    if walk_hours >= WALK_DUE_HOURS and happiness <= 80:
+        needs.append("walk_due")
+
+    if boredom >= 85:
+        needs.append("very_bored")
+    elif boredom >= 65:
         needs.append("bored")
-    if int(cat.get("happiness", 100)) <= settings.happiness_alert_threshold:
+    elif boredom >= 45:
+        needs.append("restless")
+
+    if happiness <= 20:
+        needs.append("very_sad")
+    elif happiness <= 40:
         needs.append("sad")
+
     return needs
+
+
+def notification_gap_seconds(needs: list[str]) -> int:
+    """Urgent needs remind sooner; mild warnings stay quiet longer."""
+    urgent = {
+        "love_critical",
+        "trust_critical",
+        "starving",
+        "exhausted",
+        "very_bored",
+        "very_sad",
+    }
+    moderate = {
+        "love_low",
+        "trust_low",
+        "hungry",
+        "tired",
+        "bored",
+        "sad",
+        "walk_due",
+    }
+    if any(item in urgent for item in needs):
+        return min(settings.notification_min_gap, 2 * 60 * 60)
+    if any(item in moderate for item in needs):
+        return min(settings.notification_min_gap, 4 * 60 * 60)
+    return settings.notification_min_gap
 
 
 async def ensure_user(user_id: int) -> dict:
