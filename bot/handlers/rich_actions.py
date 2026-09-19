@@ -140,7 +140,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     lock_user_id = user_id
     if cat_id is not None:
-        snapshot = await get_cat_by_id(cat_id)
+        snapshot = await get_cat_by_id(cat_id, include_fled=True)
         if snapshot is None:
             await query.answer("هذي البطاقة قديمة أو القطة ما عادت متاحة.", show_alert=True)
             return
@@ -167,7 +167,7 @@ async def _handle_rich_action_locked(
 ) -> None:
     await ensure_user(user_id)
     cat = (
-        await get_cat_by_id(cat_id)
+        await get_cat_by_id(cat_id, include_fled=True)
         if cat_id is not None
         else await get_user_cat(user_id)
     )
