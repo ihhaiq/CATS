@@ -18,6 +18,7 @@ from bot.services.local_store import (
     create_cat,
     ensure_user,
     finish_sleep,
+    fullness_percent,
     get_user_cat,
     get_user_points,
     is_sleeping,
@@ -25,6 +26,7 @@ from bot.services.local_store import (
     parse_time,
     sleep_duration_text,
     sleep_need_percent,
+    sleep_remaining_minutes,
     start_sleep,
     update_cat,
     user_action_lock,
@@ -119,7 +121,7 @@ def _state_text(cat: dict) -> str:
     return (
         f"🐾 {cat['name']}\n"
         f"السلالة: {cat['breed']} | #{cat['id_number']}\n"
-        f"الجوع: {cat['hunger']}/100\n"
+        f"الشبع: {fullness_percent(cat)}/100\n"
         f"السعادة: {cat['happiness']}/100\n"
         f"الحب: {cat['love_bar']}/100\n"
         f"الثقة: {cat.get('trust', 60)}/100\n"
@@ -294,7 +296,7 @@ async def _guest_message_locked(message: Message) -> None:
                 result = InlineQueryResultArticle(
                     id="guest-status",
                     title="حالة القطة",
-                    description=f"{cat['name']} | الجوع {cat['hunger']}% | السعادة {cat['happiness']}%",
+                    description=f"{cat['name']} | الشبع {fullness_percent(cat)}% | السعادة {cat['happiness']}%",
                     input_message_content=InputRichMessageContent(
                         rich_message=await _build_guest_card(
                             message,
@@ -319,7 +321,11 @@ async def _guest_message_locked(message: Message) -> None:
                     result = InlineQueryResultArticle(
                         id=f"guest-{action}-sleeping",
                         title="😴 القطة نائمة",
-                        description="صحّيها أولاً حتى تتفاعل وياها.",
+                        description=(
+                            "باقي تقريباً "
+                            f"{sleep_duration_text(sleep_remaining_minutes(cat))}. "
+                            "صحّيها أولاً حتى تتفاعل وياها."
+                        ),
                         input_message_content=InputRichMessageContent(rich_message=card),
                     )
                     await message.bot.answer_guest_query(message.guest_query_id, result)
