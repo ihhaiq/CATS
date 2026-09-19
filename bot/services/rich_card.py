@@ -6,7 +6,14 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
-from bot.services.local_store import collect_needs, is_sleeping, recommended_action, sleep_need_percent
+from bot.services.local_store import (
+    collect_needs,
+    is_sleeping,
+    recommended_action,
+    sleep_duration_text,
+    sleep_need_percent,
+    sleep_remaining_minutes,
+)
 from bot.services.media_runtime import resolve_cat_media
 
 
@@ -42,7 +49,16 @@ async def build_rich_card(
         media_markup = "<p>الصورة الواقعية ستظهر بعد إضافة ملف القطة.</p>"
 
     sleeping = is_sleeping(cat)
-    sleep_note = "<p>😴 القطة نائمة. كل الأفعال متوقفة حتى تستيقظ.</p>" if sleeping else ""
+    if sleeping:
+        sleep_kind = cat.get("sleep_kind")
+        sleep_label = "نوم رئيسي" if sleep_kind == "main" else "قيلولة"
+        remaining = sleep_duration_text(sleep_remaining_minutes(cat))
+        sleep_note = (
+            f"<p>😴 القطة في {sleep_label}. "
+            f"⏳ باقي تقريباً {remaining}، وبعدها تصحى من نفسها.</p>"
+        )
+    else:
+        sleep_note = ""
     notice = cat.get("action_notice", "")
     notice_html = f"<p><b>{notice}</b></p>" if notice else ""
     wake_action = "wake" if sleeping else "sleep"
