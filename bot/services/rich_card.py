@@ -178,21 +178,21 @@ async def build_rich_card(
     if sleeping:
         action_buttons_html = f"""
 <tg-button-row align="center">
-<tg-button type="callback_data" style="primary" data="{action_data("wake")}">إيقاظ</tg-button>
-<tg-button type="callback_data" data="{action_data("status")}">تحديث</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('wake')}">إيقاظ</tg-button>
+<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
 </tg-button-row>
 """.strip()
     else:
         action_buttons_html = f"""
 <tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="{action_data("feed")}">{feed_label}</tg-button>
-<tg-button type="callback_data" style="primary" data="{action_data("play")}">{play_label}</tg-button>
-<tg-button type="callback_data" data="{action_data("walk")}">{walk_label}</tg-button>
+<tg-button type="callback_data" style="success" data="{action_data('feed')}">{feed_label}</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('play')}">{play_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('walk')}">{walk_label}</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
-<tg-button type="callback_data" data="{action_data("talk")}">{talk_label}</tg-button>
-<tg-button type="callback_data" data="{action_data("sleep")}">{sleep_button_label}</tg-button>
-<tg-button type="callback_data" data="cat:status">تحديث</tg-button>
+<tg-button type="callback_data" data="{action_data('talk')}">{talk_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('sleep')}">{sleep_button_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
 </tg-button-row>
 """.strip()
     hint_map = {
