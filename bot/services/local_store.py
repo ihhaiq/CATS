@@ -602,6 +602,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
     elif streak >= 3:
         trust_gain = max(0, trust_gain - (streak - 2))
     cat["trust"] = min(100, trust + trust_gain)
+    cat["last_care_meaningful"] = bool(meaningful)
 
     # Repeating one interaction inside a short window becomes less stimulating.
     if action in {"talk", "walk"} and streak >= 4:
@@ -692,7 +693,7 @@ def care_reward_points(
     bypassed_cooldown: bool = False,
 ) -> int:
     """Same reward on every surface; need-rescue bypasses never farm points."""
-    if bypassed_cooldown:
+    if bypassed_cooldown or not bool(cat.get("last_care_meaningful", False)):
         return 0
     if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
         return 0
