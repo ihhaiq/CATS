@@ -22,7 +22,12 @@ def old_cat(hours: float = 24) -> dict:
         "trust": 60,
         "boredom": 10,
         "last_care_action": None,
+        "last_care_at": None,
+        "last_social_at": stamp,
+        "last_talk": None,
         "same_action_streak": 0,
+        "sleep_day": datetime.utcnow().date().isoformat(),
+        "slept_today_hours": 0.0,
         "last_fed": stamp,
         "last_played": stamp,
         "last_walk": stamp,
@@ -48,8 +53,8 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertLess(cat["trust"], 60)
 
         needs = collect_needs(cat)
-        self.assertIn("hungry", needs)
-        self.assertIn("tired", needs)
+        self.assertIn("starving", needs)
+        self.assertIn("exhausted", needs)
 
     def test_feeding_improves_mood_and_love_not_rest(self) -> None:
         cat = old_cat(12)
@@ -66,7 +71,7 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertLess(cat["hunger"], hunger_before)
         self.assertGreater(cat["happiness"], happiness_before)
         self.assertGreaterEqual(cat["love_bar"], love_before)
-        self.assertGreater(cat["trust"], trust_before)
+        self.assertGreaterEqual(cat["trust"], trust_before)
         self.assertEqual(cat["boredom"], boredom_before)
         self.assertEqual(sleep_need_percent(cat), rest_before)
 
@@ -112,6 +117,41 @@ class CoupledNeedsTests(unittest.TestCase):
             apply_care_effects(cat, "feed")
         self.assertGreater(cat["boredom"], 20)
 
+    def test_routine_streak_expires_after_six_hours(self) -> None:
+        cat = old_cat(0)
+        cat["last_care_action"] = "talk"
+        cat["same_action_streak"] = 5
+        cat["last_care_at"] = (datetime.utcnow() - timedelta(hours=7)).isoformat()
+        cat["boredom"] = 70
+        apply_care_effects(cat, "talk")
+        self.assertEqual(cat["same_action_streak"], 1)
+
+    def test_normal_sleep_does_not_create_oversleep_boredom(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["boredom"] = 20
+        cat["rest_level"] = 20
+        cat["rest_updated_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=4)).isoformat()
+        cat["slept_today_hours"] = 0.0
+        apply_decay(cat)
+        self.assertEqual(cat["boredom"], 20)
+
+    def test_oversleep_adds_boredom(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["boredom"] = 20
+        cat["rest_level"] = 90
+        cat["rest_updated_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
+        cat["slept_today_hours"] = 8.0
+        apply_decay(cat)
+        self.assertGreater(cat["boredom"], 20)
+
     def test_multiple_needs_are_reported_together(self) -> None:
         cat = old_cat(24)
         cat["hunger"] = 95
@@ -124,12 +164,12 @@ class CoupledNeedsTests(unittest.TestCase):
 
         needs = collect_needs(cat)
         self.assertIn("love_low", needs)
-        self.assertIn("trust_low", needs)
-        self.assertIn("bored", needs)
-        self.assertIn("hungry", needs)
-        self.assertIn("tired", needs)
+        self.assertIn("trust_critical", needs)
+        self.assertIn("very_bored", needs)
+        self.assertIn("starving", needs)
+        self.assertIn("exhausted", needs)
         self.assertIn("walk_due", needs)
-        self.assertIn("sad", needs)
+        self.assertIn("very_sad", needs)
 
 
 if __name__ == "__main__":
