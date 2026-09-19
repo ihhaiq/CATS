@@ -78,10 +78,24 @@ async def build_rich_card(
         return f"<mark><b>{value}</b></mark>" if highlight else value
 
     action_highlights = {
-        "feed": {"fullness"},
-        "play": {"happiness", "boredom", "rest"},
-        "walk": {"happiness", "boredom", "rest"},
-        "talk": {"happiness", "love", "boredom"},
+        "feed": {"fullness", "happiness", "love", "trust"},
+        "play": {
+            "fullness",
+            "happiness",
+            "love",
+            "trust",
+            "boredom",
+            "rest",
+        },
+        "walk": {
+            "fullness",
+            "happiness",
+            "love",
+            "trust",
+            "boredom",
+            "rest",
+        },
+        "talk": {"happiness", "love", "trust", "boredom"},
         "sleep": {"rest"},
     }.get(media_kind, set())
 
@@ -97,7 +111,10 @@ async def build_rich_card(
         f"{love}%",
         "love" in action_highlights or love <= 30,
     )
-    trust_cell = stat_cell(f"{trust}%", trust <= 35)
+    trust_cell = stat_cell(
+        f"{trust}%",
+        "trust" in action_highlights or trust <= 35,
+    )
     boredom_cell = stat_cell(
         f"{boredom}%",
         "boredom" in action_highlights or boredom >= 35,
