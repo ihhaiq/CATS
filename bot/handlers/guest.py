@@ -1,4 +1,5 @@
 """Guest Mode replies for messages that summon the bot by username."""
+import html
 import logging
 import random
 import re
@@ -15,6 +16,7 @@ from bot.services.local_store import (
     apply_decay,
     award_points,
     can_bypass_action_cooldown,
+    care_reward_points,
     create_cat,
     ensure_user,
     finish_sleep,
@@ -119,8 +121,8 @@ async def _build_guest_card(message: Message, caller, cat: dict, points: int, st
 
 def _state_text(cat: dict) -> str:
     return (
-        f"🐾 {cat['name']}\n"
-        f"السلالة: {cat['breed']} | #{cat['id_number']}\n"
+        f"🐾 {html.escape(str(cat['name']))}\n"
+        f"السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}\n"
         f"الشبع: {fullness_percent(cat)}/100\n"
         f"السعادة: {cat['happiness']}/100\n"
         f"الحب: {cat['love_bar']}/100\n"
@@ -262,8 +264,8 @@ async def _guest_message_locked(message: Message) -> None:
                 "partner_affinity": 0,
                 "is_fled": False,
                 "last_fed": stamp,
-                "last_played": stamp,
-                "last_walk": stamp,
+                "last_played": None,
+                "last_walk": None,
                 "last_decay_at": stamp,
                 "sleep_day": datetime.utcnow().date().isoformat(),
                 "slept_today_hours": 0.0,
@@ -290,7 +292,7 @@ async def _guest_message_locked(message: Message) -> None:
             title = "لا توجد قطة"
         else:
             apply_decay(cat)
-            finish_sleep(cat)
+            woke = finish_sleep(cat)
             await update_cat(cat)
             if action == "status":
                 result = InlineQueryResultArticle(
@@ -407,22 +409,22 @@ async def _guest_message_locked(message: Message) -> None:
                 cat[timestamp_key] = datetime.utcnow().isoformat()
 
                 if action == "feed":
-                    points = random.choice([0, 0, 2, 5, 8])
                     title = "🍖 تم الإطعام"
                 elif action == "play":
                     if int(cat.get("same_action_streak", 1)) >= 5:
-                        points = 0
                         title = "😾 ملت من نفس اللعب"
                     else:
-                        points = random.choice([0, 1, 3, 5, 10])
                         title = "🎾 لعبت وياها"
                 elif action == "walk":
-                    points = random.choice([0, 2, 5, 10, 15])
                     title = "🌿 طلعت نزهة"
                 else:
-                    points = random.choice([0, 1, 2, 4])
                     title = "💬 حچيت وياها"
 
+                points = care_reward_points(
+                    cat,
+                    action,
+                    bypassed_cooldown=bypassed,
+                )
                 await update_cat(cat)
                 if points:
                     balance = await award_points(user_id, points, action)
@@ -430,7 +432,7 @@ async def _guest_message_locked(message: Message) -> None:
                     balance = await get_user_points(user_id)
 
                 description = (
-                    "⚡ التهدئة انفتحت لأنها كانت تحتاج هذا الفعل."
+                    "⚡ التهدئة انفتحت للحاجة؛ الرعاية تنحسب بدون نقاط إضافية."
                     if bypassed
                     else cat["name"]
                 )
@@ -509,8 +511,12 @@ async def _guest_message_locked(message: Message) -> None:
                         else cat["name"]
                     )
                 else:
-                    title = "😺 القطة صاحية أصلًا"
-                    description = cat["name"]
+                    title = "😺 صحت من نفسها" if woke else "😺 القطة صاحية أصلًا"
+                    description = (
+                        "خلص نومها قبل ما تطلب الإيقاظ."
+                        if woke
+                        else cat["name"]
+                    )
 
                 card = await _build_guest_card(
                     message,
