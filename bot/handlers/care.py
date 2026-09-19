@@ -50,9 +50,13 @@ async def _care(message: Message, action: str) -> None:
     await update_cat(cat)
     await message.answer("😾 القطة تحتاج النوم الآن وترفض هذا الفعل.")
     return
-  if refusal_until and datetime.utcnow().timestamp() < refusal_until:
+  if (
+    refusal_until
+    and datetime.utcnow().timestamp() < refusal_until
+    and action in {"play", "walk"}
+  ):
     await update_cat(cat)
-    await message.answer("😾 القطة ستقبل بعد دقائق قليلة.")
+    await message.answer("😾 القطة مرهقة، خليها ترتاح شوي قبل اللعب أو النزهة.")
     return
   if refusal_until:
     cat.pop("action_refusal_until", None)
