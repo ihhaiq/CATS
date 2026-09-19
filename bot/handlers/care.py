@@ -13,11 +13,14 @@ from bot.services.local_store import (
   award_points,
   can_bypass_action_cooldown,
   ensure_user,
+  fullness_percent,
   get_user_cat,
   get_user_points,
   is_sleeping,
   parse_time,
+  sleep_duration_text,
   sleep_need_percent,
+  sleep_remaining_minutes,
   update_cat,
   user_action_lock,
 )
@@ -61,7 +64,11 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   apply_decay(cat)
   if is_sleeping(cat):
     await update_cat(cat)
-    await message.answer("😴 القطة نائمة هسه. إذا تريد تتفاعل وياها، صحّيها أولاً.")
+    remaining = sleep_duration_text(sleep_remaining_minutes(cat))
+    await message.answer(
+      f"😴 القطة نائمة هسه، باقي تقريباً {remaining}. "
+      "إذا تريد تتفاعل وياها، صحّيها أولاً."
+    )
     return
 
   block_reason = action_block_reason(cat, action)
@@ -133,7 +140,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   )
   await message.answer(
     f"{text}!{bypass_note}\n"
-    f"الجوع: {cat['hunger']}/100 | السعادة: {cat['happiness']}/100 | "
+    f"الشبع: {fullness_percent(cat)}/100 | السعادة: {cat['happiness']}/100 | "
     f"الملل: {cat.get('boredom', 10)}/100 | الراحة: {sleep_need_percent(cat)}/100\n"
     f"نقاطك: {balance}"
   )
