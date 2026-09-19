@@ -1,6 +1,7 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
+import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -222,21 +223,6 @@ def sleep_need_percent(cat: dict) -> int:
 def fullness_percent(cat: dict) -> int:
     """User-facing fullness: 100 = full, 0 = starving."""
     return max(0, min(100, 100 - int(cat.get("hunger", 20))))
-
-
-def mark_fled_if_needed(cat: dict) -> bool:
-    """Make love=0 terminal immediately, regardless of which UI was used."""
-    if cat.get("is_fled"):
-        return True
-    if int(cat.get("love_bar", 100)) <= 0:
-        cat["love_bar"] = 0
-        cat["is_fled"] = True
-        cat["sleep_until"] = None
-        cat["sleep_started_at"] = None
-        cat["sleep_planned_hours"] = 0
-        cat["sleep_kind"] = None
-        return True
-    return False
 
 
 def wake_if_ready(cat: dict) -> bool:
