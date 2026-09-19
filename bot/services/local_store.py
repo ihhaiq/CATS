@@ -60,7 +60,7 @@ REST_FALL_PER_AWAKE_HOUR = 8.0
 REST_RECOVERY_PER_SLEEP_HOUR = 10.0
 HUNGER_RISE_PER_AWAKE_HOUR = 3.0
 HUNGER_RISE_PER_SLEEP_HOUR = 1.0
-BOREDOM_RISE_PER_AWAKE_HOUR = 1.0
+BOREDOM_RISE_PER_AWAKE_HOUR = 1.5
 BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
 TRUST_FALL_PER_NEGLECT_HOUR = 0.7
 WALK_DUE_HOURS = 14.0
@@ -159,9 +159,9 @@ def start_sleep(cat: dict) -> int:
         cat["slept_today_hours"] = 0.0
 
     slept = _effective_slept_today(cat, now)
-    # Sleep duration follows the actual deficit. From 0% to ~95% takes about
-    # 9.5 hours; from 50% it takes about 4.5 hours.
-    hours_needed = max(1.0, (95 - rest) / REST_RECOVERY_PER_SLEEP_HOUR)
+    # Sleep duration follows the actual deficit. From 0% to 100% takes about
+    # 10 hours; from 50% it takes about 5 hours.
+    hours_needed = max(1.0, (100 - rest) / REST_RECOVERY_PER_SLEEP_HOUR)
     if slept >= 10:
         hours_needed = min(hours_needed, 1.5)
     hours = min(10.0, hours_needed)
@@ -226,6 +226,13 @@ def _walk_hours(cat: dict, moment: datetime) -> float:
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
 
 
+def _social_hours(cat: dict, moment: datetime) -> float:
+    value = cat.get("last_social_at") or cat.get("last_played")
+    if not value:
+        return 0.0
+    return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
+
+
 def apply_decay(cat: dict) -> None:
     """Advance needs in small time slices so neglect is never backdated."""
     now = datetime.utcnow()
@@ -265,6 +272,11 @@ def apply_decay(cat: dict) -> None:
         )
 
         boredom += awake * BOREDOM_RISE_PER_AWAKE_HOUR
+        social_hours = _social_hours(cat, step_end)
+        if social_hours >= 8:
+            boredom += awake * 0.5
+        if social_hours >= 14:
+            boredom += awake * 0.75
         boredom += (
             _oversleep_between(cat, cursor, step_end)
             * BOREDOM_RISE_PER_OVERSLEEP_HOUR
@@ -368,8 +380,8 @@ def apply_care_effects(cat: dict, action: str) -> None:
     if action == "feed":
         meaningful = hunger_before >= 35
         cat["hunger"] = max(0, hunger_before - 40)
-        cat["happiness"] = min(100, happiness_before + (8 if meaningful else 3))
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + (3 if meaningful else 1))
+        cat["happiness"] = min(100, happiness_before + (8 if meaningful else 1))
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + (3 if meaningful else 0))
         if streak >= 3 and not meaningful:
             cat["boredom"] = min(100, boredom + 4)
     elif action == "play":
@@ -456,7 +468,7 @@ def collect_needs(cat: dict) -> list[str]:
         needs.append("very_bored")
     elif boredom >= 65:
         needs.append("bored")
-    elif boredom >= 45:
+    elif boredom >= 35:
         needs.append("restless")
 
     if happiness <= 20:
