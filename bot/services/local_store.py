@@ -843,6 +843,20 @@ async def get_user_cat(user_id: int) -> dict | None:
         return next((cat for cat in data["cats"] if cat["owner_id"] == user_id and not cat["is_fled"]), None)
 
 
+async def get_cat_by_id(cat_id: int) -> dict | None:
+    async with _lock:
+        data = _read()
+        return next(
+            (
+                cat
+                for cat in data["cats"]
+                if int(cat.get("cat_id", 0)) == int(cat_id)
+                and not cat.get("is_fled")
+            ),
+            None,
+        )
+
+
 async def get_active_cats() -> list[dict]:
     async with _lock:
         return [cat for cat in _read()["cats"] if not cat.get("is_fled")]
