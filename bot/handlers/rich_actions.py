@@ -304,7 +304,7 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
         start_sleep(cat)
         cat["wake_attempts"] = 0
-        points = random.choice([0, 1, 2])
+        points = 0
         media_kind = "sleep"
         if rest_now <= 25:
             notice_token = _set_action_notice(
