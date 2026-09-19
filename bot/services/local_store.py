@@ -8,6 +8,17 @@ from bot.config import settings
 from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
 _lock = asyncio.Lock()
+_action_locks: dict[int, asyncio.Lock] = {}
+
+
+def user_action_lock(user_id: int) -> asyncio.Lock:
+    """Serialize stateful operations for one cat owner/user."""
+    lock = _action_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _action_locks[user_id] = lock
+    return lock
+
 
 
 def _path() -> Path:
@@ -90,7 +101,7 @@ CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
 HEALTHY_SLEEP_HOURS = 16.0
 MAIN_SLEEP_REST_THRESHOLD = 35
 MAIN_SLEEP_MIN_HOURS = 4.0
-MAIN_SLEEP_MAX_HOURS = 10.0
+MAIN_SLEEP_MAX_HOURS = 12.5
 NAP_MIN_HOURS = 0.75
 NAP_MAX_HOURS = 2.5
 
@@ -107,30 +118,67 @@ def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
     return max(0.0, (overlap_end - overlap_start).total_seconds() / 3600)
 
 
+def _day_start(moment: datetime) -> datetime:
+    return datetime.combine(moment.date(), datetime.min.time())
+
+
 def _session_sleep_until(cat: dict, moment: datetime) -> float:
-    """Hours already slept in the current active sleep session by moment."""
+    """Hours from the active sleep session that belong to moment's UTC day."""
     started = cat.get("sleep_started_at")
     until = cat.get("sleep_until")
     if not started or not until:
         return 0.0
-    sleep_start = parse_time(started)
-    sleep_end = min(moment, parse_time(until))
+
+    day_start = _day_start(moment)
+    day_end = day_start + timedelta(days=1)
+    sleep_start = max(parse_time(started), day_start)
+    sleep_end = min(moment, parse_time(until), day_end)
     if sleep_end <= sleep_start:
         return 0.0
-    return max(0.0, (sleep_end - sleep_start).total_seconds() / 3600)
+    return (sleep_end - sleep_start).total_seconds() / 3600
 
 
 def _effective_slept_today(cat: dict, moment: datetime) -> float:
-    return float(cat.get("slept_today_hours", 0.0)) + _session_sleep_until(cat, moment)
+    saved = (
+        float(cat.get("slept_today_hours", 0.0))
+        if cat.get("sleep_day") == moment.date().isoformat()
+        else 0.0
+    )
+    return saved + _session_sleep_until(cat, moment)
 
 
-def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
-    """Only sleep beyond the healthy daily amount adds boredom."""
+def _oversleep_segment(cat: dict, start: datetime, end: datetime) -> float:
     before = _effective_slept_today(cat, start)
-    after = _effective_slept_today(cat, end)
+    slept = _sleep_overlap_hours(cat, start, end)
+    after = before + slept
     return max(0.0, after - HEALTHY_SLEEP_HOURS) - max(
         0.0, before - HEALTHY_SLEEP_HOURS
     )
+
+
+def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
+    """Only sleep beyond the healthy daily amount adds boredom, per UTC day."""
+    if end <= start:
+        return 0.0
+    if start.date() == end.date():
+        return _oversleep_segment(cat, start, end)
+
+    midnight = _day_start(end)
+    return (
+        _oversleep_segment(cat, start, midnight)
+        + _oversleep_segment(cat, midnight, end)
+    )
+
+
+def _commit_sleep_today(cat: dict, moment: datetime) -> None:
+    """Commit only the part of the finished session that belongs to today."""
+    saved = (
+        float(cat.get("slept_today_hours", 0.0))
+        if cat.get("sleep_day") == moment.date().isoformat()
+        else 0.0
+    )
+    cat["sleep_day"] = moment.date().isoformat()
+    cat["slept_today_hours"] = saved + _session_sleep_until(cat, moment)
 
 
 def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
@@ -187,9 +235,12 @@ def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
         cat["slept_today_hours"] = 0.0
 
     slept = _effective_slept_today(cat, now)
+    recovery = REST_RECOVERY_PER_SLEEP_HOUR
+    if int(cat.get("hunger", 20)) >= 85:
+        recovery *= 0.8
     deficit_hours = max(
         NAP_MIN_HOURS,
-        (100 - rest) / REST_RECOVERY_PER_SLEEP_HOUR,
+        (100 - rest) / recovery,
     )
 
     # A deeply tired cat takes a real main sleep. Otherwise it takes one of
@@ -233,12 +284,7 @@ def finish_sleep(cat: dict) -> bool:
         return False
     now = datetime.utcnow()
     _refresh_rest(cat, now)
-    started = cat.get("sleep_started_at")
-    if started:
-        elapsed = max(0, (now - parse_time(started)).total_seconds() / 3600)
-        cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
-            elapsed, float(cat.get("sleep_planned_hours", 0))
-        )
+    _commit_sleep_today(cat, now)
 
     kind = cat.get("sleep_kind") or "sleep"
     cat["last_sleep_kind"] = kind
@@ -260,12 +306,7 @@ def wake_now(cat: dict) -> bool:
         return False
     now = datetime.utcnow()
     _refresh_rest(cat, now)
-    started = cat.get("sleep_started_at")
-    if started:
-        elapsed = max(0, (now - parse_time(started)).total_seconds() / 3600)
-        cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
-            elapsed, float(cat.get("sleep_planned_hours", 0))
-        )
+    _commit_sleep_today(cat, now)
     cat["last_sleep_kind"] = cat.get("sleep_kind") or "sleep"
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
