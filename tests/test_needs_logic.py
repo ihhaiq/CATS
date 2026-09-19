@@ -167,6 +167,14 @@ class CoupledNeedsTests(unittest.TestCase):
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
 
+    def test_social_attention_warning_precedes_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 30
+        cat["last_social_at"] = (datetime.utcnow() - timedelta(hours=11)).isoformat()
+        needs = collect_needs(cat)
+        self.assertIn("attention_due", needs)
+        self.assertNotIn("restless", needs)
+
     def test_multiple_needs_are_reported_together(self) -> None:
         cat = old_cat(24)
         cat["hunger"] = 95
