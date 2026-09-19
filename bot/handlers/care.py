@@ -65,6 +65,10 @@ async def _care(message: Message, action: str) -> None:
     await update_cat(cat)
     await message.answer("😾 القطة مرهقة جداً وتحتاج تنام قبل اللعب أو النزهة.")
     return
+  if action == "feed" and int(cat.get("hunger", 20)) <= 15:
+    await update_cat(cat)
+    await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
+    return
   timestamp_key = {"feed": "last_fed", "play": "last_played", "walk": "last_walk"}[action]
   cooldown = {"feed": settings.feed_cooldown, "play": settings.play_cooldown, "walk": settings.walk_cooldown}[action]
   ready, seconds_left = check_cooldown(parse_time(cat[timestamp_key]), cooldown)
