@@ -65,6 +65,7 @@ async def build_rich_card(
         "love_critical": "💔 رابطتكم بحالة حرجة.",
         "love_low": "🥺 حست بالإهمال.",
         "walk_due": "🌿 محتاجة نزهة وتغيير جو.",
+        "attention_due": "💭 مشتاقتلك وتريد تفاعل وياك.",
         "sleepy": "🥱 بدت تنعس.",
         "peckish": "🥣 بدت تجوع شوي.",
     }
@@ -82,6 +83,7 @@ async def build_rich_card(
         "sad",
         "bored",
         "walk_due",
+        "attention_due",
         "sleepy",
         "restless",
         "peckish",
