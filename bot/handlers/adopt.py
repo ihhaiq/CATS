@@ -1,5 +1,6 @@
 """Adoption and onboarding handlers."""
 from datetime import datetime
+import html
 import random
 
 from aiogram import F, Router
@@ -38,9 +39,9 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
 def _adopted_card(cat: dict) -> InputRichMessage:
   return InputRichMessage(
     html=f"""
-<h2>🐾 تم تبني {cat['name']}!</h2>
-<p>السلالة: {cat['breed']}</p>
-<p>رقمها: #{cat['id_number']}</p>
+<h2>🐾 تم تبني {html.escape(str(cat['name']))}!</h2>
+<p>السلالة: {html.escape(str(cat['breed']))}</p>
+<p>رقمها: #{html.escape(str(cat['id_number']))}</p>
 <tg-button-row align="center">
 <tg-button type="callback_data" style="primary" data="cat:status">عرض القطة</tg-button>
 </tg-button-row>
@@ -79,8 +80,8 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "partner_affinity": 0,
     "is_fled": False,
     "last_fed": stamp,
-    "last_played": stamp,
-    "last_walk": stamp,
+    "last_played": None,
+    "last_walk": None,
     "last_decay_at": stamp,
     "sleep_day": datetime.utcnow().date().isoformat(),
     "slept_today_hours": 0.0,
