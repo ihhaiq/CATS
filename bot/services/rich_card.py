@@ -6,7 +6,7 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
-from bot.services.local_store import collect_needs, is_sleeping, sleep_need_percent
+from bot.services.local_store import collect_needs, is_sleeping, recommended_action, sleep_need_percent
 from bot.services.media_runtime import resolve_cat_media
 
 
@@ -47,21 +47,53 @@ async def build_rich_card(
     notice_html = f"<p><b>{notice}</b></p>" if notice else ""
     wake_action = "wake" if sleeping else "sleep"
     wake_label = "إيقاظ" if sleeping else "نوم"
-    fullness = 100 - cat["hunger"]
+    hunger = int(cat.get("hunger", 20))
+    happiness = int(cat.get("happiness", 100))
+    love = int(cat.get("love_bar", 100))
+    trust = int(cat.get("trust", 60))
+    boredom = int(cat.get("boredom", 10))
+    fullness = 100 - hunger
     sleep_need = sleep_need_percent(cat)
-    feed_highlight = media_kind == "feed"
-    sleep_highlight = media_kind == "sleep"
-    fullness_cell = (
-        f"<mark><b>{fullness}%</b></mark>"
-        if feed_highlight
-        else f"{fullness}%"
+
+    def stat_cell(value: str, highlight: bool) -> str:
+        return f"<mark><b>{value}</b></mark>" if highlight else value
+
+    fullness_cell = stat_cell(
+        f"{fullness}%",
+        media_kind == "feed" or hunger >= 70,
     )
-    sleep_cell = (
-        f"<mark><b>{sleep_need}%</b></mark>"
-        if sleep_highlight
-        else f"{sleep_need}%"
+    happiness_cell = stat_cell(f"{happiness}%", happiness <= 40)
+    love_cell = stat_cell(f"{love}%", love <= 30)
+    trust_cell = stat_cell(f"{trust}%", trust <= 35)
+    boredom_cell = stat_cell(f"{boredom}%", boredom >= 35)
+    sleep_cell = stat_cell(
+        f"{sleep_need}%",
+        media_kind == "sleep" or (not sleeping and sleep_need <= 50),
     )
+
     needs = collect_needs(cat)
+    next_action = recommended_action(cat)
+    action_labels = {
+        "feed": "🍖 إطعام",
+        "play": "🎾 لعب",
+        "walk": "🌿 نزهة",
+        "talk": "💬 تحدث",
+        "sleep": "😴 نوم",
+    }
+    recommendation_html = (
+        f"<p><b>🎯 المطلوب هسه: {action_labels[next_action]}</b></p>"
+        if next_action
+        else ""
+    )
+    feed_label = "⚡ إطعام" if next_action == "feed" else "إطعام"
+    play_label = "⚡ لعب" if next_action == "play" else "لعب"
+    walk_label = "⚡ نزهة" if next_action == "walk" else "نزهة"
+    talk_label = "⚡ تحدث" if next_action == "talk" else "تحدث"
+    sleep_button_label = (
+        "⚡ نوم"
+        if not sleeping and next_action == "sleep"
+        else wake_label
+    )
     hint_map = {
         "starving": "🚨🍖 جوعها شديد جداً.",
         "hungry": "🍗 جائعة وتحتاج أكل.",
@@ -115,22 +147,23 @@ async def build_rich_card(
 <table bordered striped compact>
 <tr><th>الحالة</th><th>النسبة</th></tr>
 <tr><td>الشبع</td><td>{fullness_cell}</td></tr>
-<tr><td>السعادة</td><td>{cat['happiness']}%</td></tr>
-<tr><td>الحب</td><td>{cat['love_bar']}%</td></tr>
-<tr><td>الثقة</td><td>{cat.get('trust', 60)}%</td></tr>
-<tr><td>الملل</td><td>{cat.get('boredom', 10)}%</td></tr>
+<tr><td>السعادة</td><td>{happiness_cell}</td></tr>
+<tr><td>الحب</td><td>{love_cell}</td></tr>
+<tr><td>الثقة</td><td>{trust_cell}</td></tr>
+<tr><td>الملل</td><td>{boredom_cell}</td></tr>
 <tr><td>الراحة والنوم</td><td>{sleep_cell}</td></tr>
 </table>
 <p><b>{state_hint}</b></p>
+{recommendation_html}
 <p>🐾 العملة القططية: {points}</p>
 <tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="cat:feed">إطعام</tg-button>
-<tg-button type="callback_data" style="primary" data="cat:play">لعب</tg-button>
-<tg-button type="callback_data" data="cat:walk">نزهة</tg-button>
+<tg-button type="callback_data" style="success" data="cat:feed">{feed_label}</tg-button>
+<tg-button type="callback_data" style="primary" data="cat:play">{play_label}</tg-button>
+<tg-button type="callback_data" data="cat:walk">{walk_label}</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
-<tg-button type="callback_data" data="cat:talk">تحدث</tg-button>
-<tg-button type="callback_data" data="cat:{wake_action}">{wake_label}</tg-button>
+<tg-button type="callback_data" data="cat:talk">{talk_label}</tg-button>
+<tg-button type="callback_data" data="cat:{wake_action}">{sleep_button_label}</tg-button>
 </tg-button-row>
 {sleep_note}
 {notice_html}
