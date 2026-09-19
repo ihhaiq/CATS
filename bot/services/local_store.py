@@ -1,7 +1,6 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
-import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -357,6 +356,27 @@ def _social_hours(cat: dict, moment: datetime) -> float:
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
 
 
+def mark_fled_if_needed(cat: dict) -> bool:
+    """Make fleeing a single runtime state, independent of which UI is used."""
+    if cat.get("is_fled"):
+        return True
+    if int(cat.get("love_bar", 100)) > 0:
+        return False
+
+    cat["is_fled"] = True
+    cat["fled_at"] = cat.get("fled_at") or now_iso()
+    cat["sleep_until"] = None
+    cat["sleep_started_at"] = None
+    cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
+    clear_action_notice(cat)
+    return True
+
+
 def apply_decay(cat: dict) -> None:
     """Advance needs in small time slices so neglect is never backdated."""
     now = datetime.utcnow()
@@ -366,6 +386,7 @@ def apply_decay(cat: dict) -> None:
     elapsed = max(0.0, (now - last_decay).total_seconds() / 3600)
     if elapsed <= 0:
         _refresh_rest(cat, now)
+        mark_fled_if_needed(cat)
         return
 
     rest_before = int(cat.get("rest_level", 100))
@@ -470,6 +491,7 @@ def apply_decay(cat: dict) -> None:
     cat["trust"] = max(0, min(100, round(trust)))
     cat["boredom"] = max(0, min(100, round(boredom)))
     cat["last_decay_at"] = now.isoformat()
+    mark_fled_if_needed(cat)
 
 
 def _routine_streak(cat: dict, action: str, moment: datetime) -> int:
@@ -494,27 +516,6 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
         moment - parse_time(previous_at)
     ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
     return recent and int(cat.get("same_action_streak", 0)) >= 5
-
-
-def care_reward_points(
-    cat: dict,
-    action: str,
-    *,
-    bypassed_cooldown: bool = False,
-) -> int:
-    """Use one reward table everywhere and never farm need-based bypasses."""
-    if bypassed_cooldown:
-        return 0
-    if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
-        return 0
-    pools = {
-        "feed": [0, 0, 2, 5, 8],
-        "play": [0, 1, 3, 5, 10],
-        "walk": [0, 2, 5, 10, 15],
-        "talk": [0, 1, 2, 4],
-    }
-    values = pools.get(action)
-    return random.choice(values) if values else 0
 
 
 def apply_care_effects(cat: dict, action: str) -> None:
