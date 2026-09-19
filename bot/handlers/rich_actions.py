@@ -245,16 +245,44 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         points = random.choice([0, 0, 2, 5, 8])
 
     elif action == "play":
+        ready, left = check_cooldown(
+            parse_time(cat["last_played"]),
+            settings.play_cooldown,
+        )
+        if not ready:
+            await query.answer(
+                f"😼 شبعت لعب هسه، جرّب بعد {max(1, left // 60)} دقيقة.",
+                show_alert=True,
+            )
+            return
         apply_care_effects(cat, "play")
         cat["last_played"] = datetime.utcnow().isoformat()
-        points = random.choice([0, 1, 3, 5, 10])
-        if random.random() < 0.15:
+        play_streak = int(cat.get("same_action_streak", 1))
+        if play_streak >= 5:
+            points = 0
             notice_token = _set_action_notice(
                 cat,
-                "😻 اندمجت باللعب وياك وصارت تركض حولك!",
+                "😾 ملت من نفس اللعب، جرّب تحچي وياها أو تطلعها نزهة.",
             )
+        else:
+            points = random.choice([0, 1, 3, 5, 10])
+            if random.random() < 0.15:
+                notice_token = _set_action_notice(
+                    cat,
+                    "😻 اندمجت باللعب وياك وصارت تركض حولك!",
+                )
 
     elif action == "walk":
+        ready, left = check_cooldown(
+            parse_time(cat["last_walk"]),
+            settings.walk_cooldown,
+        )
+        if not ready:
+            await query.answer(
+                f"🌿 توها طالعة نزهة، جرّب بعد {max(1, left // 60)} دقيقة.",
+                show_alert=True,
+            )
+            return
         apply_care_effects(cat, "walk")
         cat["last_walk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 2, 5, 10, 15])
