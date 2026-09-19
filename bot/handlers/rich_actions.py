@@ -92,16 +92,22 @@ async def _clear_notice_later(
     """
     try:
         await asyncio.sleep(10)
-        cat = await get_user_cat(user_id)
-        if cat is None or cat.get("action_notice_token") != notice_token:
-            return
+        async with user_action_lock(user_id):
+            cat = await get_user_cat(user_id)
+            if cat is None or cat.get("action_notice_token") != notice_token:
+                return
 
-        clear_action_notice(cat)
-        await update_cat(cat)
-        await _edit_card(
-            query,
-            await _build_card(query, cat, await get_user_points(user_id), "status"),
-        )
+            clear_action_notice(cat)
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "status",
+                ),
+            )
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -358,6 +364,15 @@ async def _handle_rich_action_locked(
                 cat["trust"] = max(
                     0,
                     int(cat.get("trust", 60)) - trust_loss,
+                )
+                notice_token = _set_action_notice(
+                    cat,
+                    f"😾 صحّيتها قبل ما تشبع نوم، الثقة نزلت {trust_loss}.",
+                )
+            else:
+                notice_token = _set_action_notice(
+                    cat,
+                    "☀️ صحت القطة وهي مرتاحة.",
                 )
         media_kind = "status"
         points = 0
