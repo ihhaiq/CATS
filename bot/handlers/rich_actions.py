@@ -33,7 +33,7 @@ from bot.services.local_store import (
     user_action_lock,
     wake_now,
 )
-from bot.services.rich_card import build_rich_card
+from bot.services.rich_card import build_fled_card, build_rich_card
 
 router = Router(name="rich_actions")
 logger = logging.getLogger("catibot.rich_actions")
@@ -147,6 +147,11 @@ async def _handle_rich_action_locked(
     clear_action_notice(cat)
     apply_decay(cat)
     woke = finish_sleep(cat)
+    if cat.get("is_fled"):
+        await update_cat(cat)
+        await _edit_card(query, build_fled_card(cat))
+        await query.answer("💨 القطة هربت بسبب الإهمال.", show_alert=True)
+        return
     if woke:
         await update_cat(cat)
 
