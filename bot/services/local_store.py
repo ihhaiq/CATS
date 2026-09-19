@@ -383,10 +383,24 @@ def apply_care_effects(cat: dict, action: str) -> None:
         if streak >= 3 and not meaningful:
             cat["boredom"] = min(100, boredom + 4)
     elif action == "play":
-        meaningful = boredom >= 20 or happiness_before <= 80
-        cat["happiness"] = min(100, happiness_before + 24)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 5)
-        cat["boredom"] = max(0, boredom - round(35 * novelty))
+        # Play has diminishing returns. Repeating it too often inside the
+        # routine window eventually becomes boring instead of stimulating.
+        meaningful = (boredom >= 20 or happiness_before <= 80) and streak < 5
+        if streak == 1:
+            happiness_gain, love_gain, boredom_delta = 24, 5, -35
+        elif streak == 2:
+            happiness_gain, love_gain, boredom_delta = 20, 4, -28
+        elif streak == 3:
+            happiness_gain, love_gain, boredom_delta = 12, 3, -16
+        elif streak == 4:
+            happiness_gain, love_gain, boredom_delta = 6, 2, -6
+        else:
+            happiness_gain, love_gain = 2, 1
+            boredom_delta = min(15, 5 + (streak - 5) * 3)
+
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
+        cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + 7)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
     elif action == "walk":
@@ -416,7 +430,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
     cat["trust"] = min(100, trust + trust_gain)
 
     # Repeating one interaction inside a short window becomes less stimulating.
-    if action in {"play", "talk", "walk"} and streak >= 4:
+    if action in {"talk", "walk"} and streak >= 4:
         cat["boredom"] = min(
             100,
             int(cat.get("boredom", 0)) + min(15, (streak - 3) * 4),
