@@ -19,6 +19,7 @@ from bot.services.local_store import (
    is_sleeping,
    notification_gap_seconds,
    update_cat,
+   user_action_lock,
 )
 
 _scheduler: Any = None
@@ -82,72 +83,95 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
 
 async def _wake_sweep(bot: Bot) -> None:
    async with _sweep_lock:
-      for cat in await get_active_cats():
-         apply_decay(cat)
-         finish_sleep(cat)
-         await _send_wake_notice(bot, cat)
-         await update_cat(cat)
+      for snapshot in await get_active_cats():
+         owner_id = int(snapshot["owner_id"])
+         async with user_action_lock(owner_id):
+            # Reload after acquiring the user lock so we never overwrite a
+            # button/command interaction with an older sweep snapshot.
+            cats = await get_active_cats()
+            cat = next(
+               (item for item in cats if item["cat_id"] == snapshot["cat_id"]),
+               None,
+            )
+            if cat is None:
+               continue
+            apply_decay(cat)
+            woke = finish_sleep(cat)
+            if woke:
+               cat["last_notified_state"] = None
+               cat["last_notified_at"] = None
+            await _send_wake_notice(bot, cat)
+            await update_cat(cat)
 
 
 async def _sweep(bot: Bot) -> None:
    async with _sweep_lock:
-      for cat in await get_active_cats():
-         # Decay first while sleep interval metadata still exists, then finalize wake.
-         apply_decay(cat)
-         woke = finish_sleep(cat)
-         if woke:
-            cat["last_notified_state"] = None
-            cat["last_notified_at"] = None
-         await _send_wake_notice(bot, cat)
-
-         sleeping = is_sleeping(cat)
-         needs = collect_needs(cat)
-         if sleeping:
-            # Sleeping suppresses routine activity reminders, not emergencies.
-            needs = [
-               item
-               for item in needs
-               if item in {"starving", "love_critical", "trust_critical"}
-            ]
-            if not needs:
-               await update_cat(cat)
-               continue
-         state = "|".join(needs) if needs else None
-         last_at = cat.get("last_notified_at")
-         gap = notification_gap_seconds(needs)
-         enough_gap = (
-            not last_at
-            or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds()
-            >= gap
-         )
-
-         if state and (state != cat.get("last_notified_state") or enough_gap):
-            details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in needs)
-            urgent = any(
-               item in {
-                  "love_critical",
-                  "trust_critical",
-                  "starving",
-                  "exhausted",
-                  "very_bored",
-                  "very_sad",
-               }
-               for item in needs
+      for snapshot in await get_active_cats():
+         owner_id = int(snapshot["owner_id"])
+         async with user_action_lock(owner_id):
+            cats = await get_active_cats()
+            cat = next(
+               (item for item in cats if item["cat_id"] == snapshot["cat_id"]),
+               None,
             )
-            header = "🚨 قطتك تحتاجك هسه:" if urgent else "🐾 تحديث حالة قطتك:"
-            message = f"{header}\n{details}"
-            for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
-               try:
-                  await bot.send_message(user_id, message)
-               except Exception as exc:
-                  logger.warning("Failed to notify user_id=%s: %s", user_id, exc)
-            cat["last_notified_state"] = state
-            cat["last_notified_at"] = datetime.utcnow().isoformat()
-         elif state is None:
-            cat["last_notified_state"] = None
-            cat["last_notified_at"] = None
+            if cat is None:
+               continue
+            # Decay first while sleep interval metadata still exists, then finalize wake.
+            apply_decay(cat)
+            woke = finish_sleep(cat)
+            if woke:
+               cat["last_notified_state"] = None
+               cat["last_notified_at"] = None
+            await _send_wake_notice(bot, cat)
 
-         await update_cat(cat)
+            sleeping = is_sleeping(cat)
+            needs = collect_needs(cat)
+            if sleeping:
+               # Sleeping suppresses routine activity reminders, not emergencies.
+               needs = [
+                  item
+                  for item in needs
+                  if item in {"starving", "love_critical", "trust_critical"}
+               ]
+               if not needs:
+                  await update_cat(cat)
+                  continue
+            state = "|".join(needs) if needs else None
+            last_at = cat.get("last_notified_at")
+            gap = notification_gap_seconds(needs)
+            enough_gap = (
+               not last_at
+               or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds()
+               >= gap
+            )
+
+            if state and (state != cat.get("last_notified_state") or enough_gap):
+               details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in needs)
+               urgent = any(
+                  item in {
+                     "love_critical",
+                     "trust_critical",
+                     "starving",
+                     "exhausted",
+                     "very_bored",
+                     "very_sad",
+                  }
+                  for item in needs
+               )
+               header = "🚨 قطتك تحتاجك هسه:" if urgent else "🐾 تحديث حالة قطتك:"
+               message = f"{header}\n{details}"
+               for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
+                  try:
+                     await bot.send_message(user_id, message)
+                  except Exception as exc:
+                     logger.warning("Failed to notify user_id=%s: %s", user_id, exc)
+               cat["last_notified_state"] = state
+               cat["last_notified_at"] = datetime.utcnow().isoformat()
+            elif state is None:
+               cat["last_notified_state"] = None
+               cat["last_notified_at"] = None
+
+            await update_cat(cat)
 
 
 def start_notification_sweep(bot: Bot) -> None:
