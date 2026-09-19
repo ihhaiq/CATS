@@ -496,8 +496,15 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
     return recent and int(cat.get("same_action_streak", 0)) >= 5
 
 
-def care_reward_points(cat: dict, action: str) -> int:
-    """Use one reward table across commands, Rich buttons and Guest Mode."""
+def care_reward_points(
+    cat: dict,
+    action: str,
+    *,
+    bypassed_cooldown: bool = False,
+) -> int:
+    """Use one reward table everywhere and never farm need-based bypasses."""
+    if bypassed_cooldown:
+        return 0
     if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
         return 0
     pools = {
