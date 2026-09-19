@@ -72,6 +72,32 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الشبع", card.html)
         self.assertNotIn("الجوع:", card.html)
 
+    def test_rich_card_binds_controls_to_cat_id(self) -> None:
+        cat = {
+            "cat_id": 77,
+            "name": "Bound",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "777777",
+            "hunger": 20,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "rest_updated_at": __import__("datetime").datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("cat:77:feed", card.html)
+        self.assertIn("cat:77:play", card.html)
+        self.assertIn("cat:77:status", card.html)
+        self.assertNotIn('data="cat:feed"', card.html)
+
     def test_rich_card_escapes_user_cat_name(self) -> None:
         cat = {
             "name": "<b>Test</b>",
