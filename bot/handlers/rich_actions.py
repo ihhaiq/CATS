@@ -21,6 +21,7 @@ from bot.services.local_store import (
     care_reward_points,
     ensure_user,
     finish_sleep,
+    get_cat_by_id,
     get_user_cat,
     get_user_points,
     is_sleeping,
@@ -125,22 +126,56 @@ def _schedule_notice_clear(
     asyncio.create_task(_clear_notice_later(query, user_id, notice_token))
 
 
+def _parse_cat_action(data: str) -> tuple[int | None, str]:
+    parts = data.split(":")
+    if len(parts) >= 3 and parts[1].isdigit():
+        return int(parts[1]), parts[2]
+    return None, parts[1] if len(parts) > 1 else ""
+
+
 @router.callback_query(lambda query: query.data and query.data.startswith("cat:"))
 async def handle_rich_action(query: CallbackQuery) -> None:
     user_id = query.from_user.id
-    async with user_action_lock(user_id):
-        await _handle_rich_action_locked(query, user_id)
+    cat_id, action = _parse_cat_action(query.data or "")
+
+    lock_user_id = user_id
+    if cat_id is not None:
+        snapshot = await get_cat_by_id(cat_id)
+        if snapshot is None:
+            await query.answer("هذي البطاقة قديمة أو القطة ما عادت متاحة.", show_alert=True)
+            return
+        if int(snapshot.get("owner_id", 0)) != user_id:
+            await query.answer("هذي مو قطتك 😼", show_alert=True)
+            return
+        lock_user_id = int(snapshot["owner_id"])
+
+    async with user_action_lock(lock_user_id):
+        await _handle_rich_action_locked(
+            query,
+            user_id,
+            cat_id=cat_id,
+            action=action,
+        )
 
 
 async def _handle_rich_action_locked(
     query: CallbackQuery,
     user_id: int,
+    *,
+    cat_id: int | None,
+    action: str,
 ) -> None:
-    action = query.data.split(":", 1)[1]
     await ensure_user(user_id)
-    cat = await get_user_cat(user_id)
+    cat = (
+        await get_cat_by_id(cat_id)
+        if cat_id is not None
+        else await get_user_cat(user_id)
+    )
     if cat is None:
         await query.answer("ما عندك قطة بعد.", show_alert=True)
+        return
+    if int(cat.get("owner_id", 0)) != user_id:
+        await query.answer("هذي مو قطتك 😼", show_alert=True)
         return
 
     # Any new action invalidates an older temporary notice/task.
