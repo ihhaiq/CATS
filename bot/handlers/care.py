@@ -1,13 +1,4 @@
-"""
-/feed, /play, /walk — core care actions.
-TODO (AGENT.md step 5):
-  - For each action: load cat, run decay_engine.apply_lazy_decay() first to get true current state,
-    then check server-side cooldown (config.settings.*_cooldown) against last_fed/last_played/last_walk.
-  - On success: update the relevant stat(s), update last_* timestamp, award points via economy.py
-    (which also writes a points_log row), clear last_notified_state if the triggering condition resolved.
-  - On cooldown: reply with remaining time, no state change, no points.
-  - Re-render and send the updated status image after every successful action.
-"""
+"""/feed, /play, /walk and /talk care actions."""
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -15,7 +6,20 @@ from datetime import datetime
 
 from bot.config import settings
 from bot.services.economy import check_cooldown
-from bot.services.local_store import apply_care_effects, apply_decay, award_points, action_block_reason, can_bypass_action_cooldown, get_user_cat, get_user_points, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
+from bot.services.local_store import (
+  action_block_reason,
+  apply_care_effects,
+  apply_decay,
+  award_points,
+  can_bypass_action_cooldown,
+  ensure_user,
+  get_user_cat,
+  get_user_points,
+  is_sleeping,
+  parse_time,
+  sleep_need_percent,
+  update_cat,
+)
 
 router = Router(name="care")
 
