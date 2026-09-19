@@ -3,11 +3,22 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.services.local_store import (
+    _effective_slept_today,
+    action_block_reason,
     apply_care_effects,
     apply_decay,
+    can_bypass_action_cooldown,
+    care_reward_points,
     collect_needs,
     notification_gap_seconds,
+    finish_sleep,
+    is_action_cooldown_bypassed,
+    recommended_action,
+    sleep_plan,
     sleep_need_percent,
+    sleep_ready_to_finish,
+    start_sleep,
+    wake_now,
 )
 
 
@@ -118,6 +129,21 @@ class CoupledNeedsTests(unittest.TestCase):
             apply_care_effects(cat, "feed")
         self.assertGreater(cat["boredom"], 20)
 
+    def test_repeated_play_eventually_causes_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 20
+        previous = cat["boredom"]
+        for index in range(5):
+            if index:
+                cat["last_care_at"] = datetime.utcnow().isoformat()
+            apply_care_effects(cat, "play")
+            if index == 3:
+                previous = cat["boredom"]
+        self.assertGreater(cat["boredom"], previous)
+        self.assertEqual(action_block_reason(cat, "play"), "bored_of_play")
+        self.assertFalse(can_bypass_action_cooldown(cat, "play"))
+        self.assertEqual(recommended_action(cat), "talk")
+
     def test_routine_streak_expires_after_six_hours(self) -> None:
         cat = old_cat(0)
         cat["last_care_action"] = "talk"
@@ -149,9 +175,175 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
         cat["sleep_started_at"] = (now - timedelta(hours=2)).isoformat()
         cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
-        cat["slept_today_hours"] = 8.0
+        cat["slept_today_hours"] = 16.0
         apply_decay(cat)
         self.assertGreater(cat["boredom"], 20)
+
+    def test_exhausted_cat_gets_real_main_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 20
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        kind, hours = sleep_plan(cat)
+        self.assertEqual(kind, "main")
+        self.assertGreaterEqual(hours, 4.0)
+        self.assertLessEqual(hours, 12.5)
+
+    def test_moderately_tired_cat_gets_nap(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 70
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        kind, hours = sleep_plan(cat)
+        self.assertEqual(kind, "nap")
+        self.assertGreaterEqual(hours, 0.75)
+        self.assertLessEqual(hours, 2.5)
+
+    def test_main_sleep_can_finish_when_rest_is_full(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 97
+        cat["rest_updated_at"] = (now - timedelta(minutes=10)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(minutes=10)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=2)).isoformat()
+        cat["sleep_planned_hours"] = 2.0
+        cat["sleep_kind"] = "main"
+        self.assertTrue(sleep_ready_to_finish(cat, now))
+
+    def test_natural_wake_queues_notification(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 50
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_planned_hours"] = 1.0
+        cat["sleep_kind"] = "nap"
+        self.assertTrue(finish_sleep(cat))
+        self.assertTrue(cat["wake_notice_pending"])
+        self.assertEqual(cat["wake_notice_kind"], "nap")
+        self.assertIsNone(cat["sleep_until"])
+
+    def test_manual_wake_does_not_queue_natural_notice(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 60
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        start_sleep(cat)
+        self.assertTrue(wake_now(cat))
+        self.assertFalse(cat.get("wake_notice_pending", False))
+        self.assertIsNone(cat["sleep_until"])
+
+    def test_main_sleep_wakes_early_when_rest_is_full(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 90
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=2)).isoformat()
+        cat["sleep_planned_hours"] = 3.0
+        cat["sleep_kind"] = "main"
+        self.assertTrue(finish_sleep(cat))
+        self.assertIsNone(cat["sleep_until"])
+        self.assertEqual(cat["wake_notice_kind"], "main")
+
+    def test_nap_waits_for_its_real_end_time(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 95
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now + timedelta(minutes=30)).isoformat()
+        cat["sleep_planned_hours"] = 1.5
+        cat["sleep_kind"] = "nap"
+        self.assertFalse(finish_sleep(cat))
+        self.assertIsNotNone(cat["sleep_until"])
+
+    def test_active_sleep_counts_only_hours_from_current_day(self) -> None:
+        cat = old_cat(0)
+        previous_day = datetime(2026, 1, 1, 23, 0, 0)
+        current_day = datetime(2026, 1, 2, 2, 0, 0)
+        cat["sleep_day"] = "2026-01-01"
+        cat["slept_today_hours"] = 10.0
+        cat["sleep_started_at"] = previous_day.isoformat()
+        cat["sleep_until"] = datetime(2026, 1, 2, 3, 0, 0).isoformat()
+        self.assertAlmostEqual(
+            _effective_slept_today(cat, current_day),
+            2.0,
+            places=3,
+        )
+
+    def test_hungry_cat_bypasses_feed_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 69
+        self.assertFalse(can_bypass_action_cooldown(cat, "feed"))
+        cat["hunger"] = 70
+        self.assertTrue(can_bypass_action_cooldown(cat, "feed"))
+        apply_care_effects(cat, "feed")
+        self.assertFalse(can_bypass_action_cooldown(cat, "feed"))
+
+    def test_bored_cat_bypasses_play_cooldown_until_need_is_met(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 34
+        self.assertFalse(can_bypass_action_cooldown(cat, "play"))
+        cat["boredom"] = 70
+        self.assertTrue(can_bypass_action_cooldown(cat, "play"))
+        apply_care_effects(cat, "play")
+        self.assertTrue(cat["boredom"] < 70)
+
+    def test_never_walked_cat_becomes_due_from_adoption_time(self) -> None:
+        cat = old_cat(0)
+        cat["last_walk"] = None
+        cat["adopted_at"] = (
+            datetime.utcnow() - timedelta(hours=15)
+        ).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "walk"))
+        self.assertIn("walk_due", collect_needs(cat))
+
+    def test_overdue_walk_bypasses_walk_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 100
+        cat["last_walk"] = (datetime.utcnow() - timedelta(hours=15)).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "walk"))
+        self.assertIn("walk_due", collect_needs(cat))
+        cat["last_walk"] = datetime.utcnow().isoformat()
+        self.assertFalse(can_bypass_action_cooldown(cat, "walk"))
+
+    def test_social_need_bypasses_talk_cooldown_once(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 30
+        cat["last_social_at"] = (
+            datetime.utcnow() - timedelta(hours=11)
+        ).isoformat()
+        self.assertTrue(can_bypass_action_cooldown(cat, "talk"))
+        apply_care_effects(cat, "talk")
+        self.assertFalse(can_bypass_action_cooldown(cat, "talk"))
+
+    def test_physical_actions_yield_to_hunger_and_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 90
+        self.assertEqual(action_block_reason(cat, "play"), "starving")
+        self.assertEqual(action_block_reason(cat, "walk"), "starving")
+
+        cat["hunger"] = 20
+        cat["rest_level"] = 30
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertEqual(action_block_reason(cat, "play"), "tired")
+        self.assertEqual(action_block_reason(cat, "walk"), "tired")
+
+    def test_recommended_action_uses_real_priority(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 10
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        cat["hunger"] = 95
+        self.assertEqual(recommended_action(cat), "feed")
+
+        cat["hunger"] = 20
+        self.assertEqual(recommended_action(cat), "sleep")
+
+    def test_zero_love_marks_cat_as_fled_during_decay(self) -> None:
+        cat = old_cat(0)
+        cat["love_bar"] = 0
+        apply_decay(cat)
+        self.assertTrue(cat["is_fled"])
+        self.assertIsNotNone(cat.get("fled_at"))
 
     def test_alerts_have_progressive_severity(self) -> None:
         cat = old_cat(0)
@@ -166,6 +358,62 @@ class CoupledNeedsTests(unittest.TestCase):
         mild = notification_gap_seconds(["peckish"])
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
+
+    def test_optional_care_without_real_need_has_no_reward(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 100
+        cat["love_bar"] = 100
+        cat["trust"] = 100
+        cat["boredom"] = 0
+        apply_care_effects(cat, "talk")
+        self.assertFalse(cat["last_care_meaningful"])
+        self.assertEqual(care_reward_points(cat, "talk"), 0)
+
+    def test_bypass_icon_state_requires_a_live_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 75
+        cat["last_fed"] = (
+            datetime.utcnow() - timedelta(minutes=5)
+        ).isoformat()
+        self.assertTrue(is_action_cooldown_bypassed(cat, "feed"))
+
+        cat["last_fed"] = (
+            datetime.utcnow() - timedelta(minutes=20)
+        ).isoformat()
+        self.assertFalse(is_action_cooldown_bypassed(cat, "feed"))
+
+    def test_natural_wake_resets_old_need_notification_state(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["last_notified_state"] = "hungry"
+        cat["last_notified_at"] = now.isoformat()
+        cat["rest_level"] = 50
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_planned_hours"] = 1.0
+        cat["sleep_kind"] = "nap"
+        self.assertTrue(finish_sleep(cat))
+        self.assertIsNone(cat["last_notified_state"])
+        self.assertIsNone(cat["last_notified_at"])
+
+    def test_need_bypass_never_awards_points(self) -> None:
+        cat = old_cat(0)
+        self.assertEqual(
+            care_reward_points(cat, "feed", bypassed_cooldown=True),
+            0,
+        )
+        self.assertEqual(
+            care_reward_points(cat, "talk", bypassed_cooldown=True),
+            0,
+        )
+
+    def test_low_relationship_needs_talk_immediately(self) -> None:
+        cat = old_cat(0)
+        cat["last_social_at"] = datetime.utcnow().isoformat()
+        cat["love_bar"] = 20
+        self.assertTrue(can_bypass_action_cooldown(cat, "talk"))
+        self.assertEqual(recommended_action(cat), "talk")
 
     def test_social_attention_warning_precedes_boredom(self) -> None:
         cat = old_cat(0)

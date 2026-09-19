@@ -1,5 +1,6 @@
 """Adoption and onboarding handlers."""
 from datetime import datetime
+import html
 import random
 
 from aiogram import F, Router
@@ -9,7 +10,13 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputRichMessage, Message
 
 from bot.services.economy import assign_random_breed
-from bot.services.local_store import create_cat, ensure_user, get_user_cat, now_iso
+from bot.services.local_store import (
+  create_cat,
+  ensure_user,
+  get_user_cat,
+  now_iso,
+  user_action_lock,
+)
 
 router = Router(name="adopt")
 
@@ -35,24 +42,43 @@ def _welcome_keyboard() -> InlineKeyboardMarkup:
   )
 
 
-def _adopted_card(cat: dict) -> InputRichMessage:
+def _adopted_card(
+  cat: dict,
+  *,
+  newly_adopted: bool = True,
+) -> InputRichMessage:
+  heading = (
+    f"🐾 تم تبني {html.escape(str(cat['name']))}!"
+    if newly_adopted
+    else f"🐾 قطتك {html.escape(str(cat['name']))}"
+  )
+  status_data = (
+    f"cat:{cat['cat_id']}:status"
+    if cat.get("cat_id")
+    else "cat:status"
+  )
   return InputRichMessage(
     html=f"""
-<h2>🐾 تم تبني {cat['name']}!</h2>
-<p>السلالة: {cat['breed']}</p>
-<p>رقمها: #{cat['id_number']}</p>
+<h2>{heading}</h2>
+<p>السلالة: {html.escape(str(cat['breed']))}</p>
+<p>رقمها: #{html.escape(str(cat['id_number']))}</p>
 <tg-button-row align="center">
-<tg-button type="callback_data" style="primary" data="cat:status">عرض القطة</tg-button>
+<tg-button type="callback_data" style="primary" data="{status_data}">عرض القطة</tg-button>
 </tg-button-row>
 """.strip(),
     is_rtl=True,
   )
 
 
-async def _send_adopted(message: Message, cat: dict) -> None:
+async def _send_adopted(
+  message: Message,
+  cat: dict,
+  *,
+  newly_adopted: bool = True,
+) -> None:
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
-    rich_message=_adopted_card(cat),
+    rich_message=_adopted_card(cat, newly_adopted=newly_adopted),
   )
 
 
@@ -61,6 +87,7 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
   cat = {
     "owner_id": user_id,
     "partner_id": None,
+    "adopted_at": stamp,
     "name": name,
     "title": "الأليف",
     "id_number": str(random.randint(100000, 999999)),
@@ -79,18 +106,29 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "partner_affinity": 0,
     "is_fled": False,
     "last_fed": stamp,
-    "last_played": stamp,
-    "last_walk": stamp,
+    "last_played": None,
+    "last_walk": None,
     "last_decay_at": stamp,
     "sleep_day": datetime.utcnow().date().isoformat(),
     "slept_today_hours": 0.0,
     "sleep_until": None,
+    "sleep_kind": None,
+    "sleep_planned_hours": 0.0,
     "last_wake_at": stamp,
     "rest_level": 100,
     "rest_updated_at": stamp,
   }
   await create_cat(cat)
   return cat
+
+
+async def _get_or_create_cat(user_id: int, name: str) -> tuple[dict, bool]:
+  async with user_action_lock(user_id):
+    await ensure_user(user_id)
+    existing = await get_user_cat(user_id)
+    if existing is not None:
+      return existing, False
+    return await _create_cat_for_user(user_id, name), True
 
 
 @router.message(CommandStart())
@@ -100,7 +138,7 @@ async def cmd_start(message: Message) -> None:
   if cat is not None:
     await message.bot.send_rich_message(
       chat_id=message.chat.id,
-      rich_message=_adopted_card(cat),
+      rich_message=_adopted_card(cat, newly_adopted=False),
     )
     return
   await message.answer(
@@ -157,32 +195,19 @@ async def receive_adopt_name(message: Message, state: FSMContext) -> None:
     return
 
   user_id = message.from_user.id
-  await ensure_user(user_id)
-  existing = await get_user_cat(user_id)
-  if existing is not None:
-    await state.clear()
-    await _send_adopted(message, existing)
-    return
-
-  cat = await _create_cat_for_user(user_id, name)
+  cat, created = await _get_or_create_cat(user_id, name)
   await state.clear()
-  await _send_adopted(message, cat)
+  await _send_adopted(message, cat, newly_adopted=created)
 
 
 @router.message(Command("adopt", "تبني", "تبنّي"))
 async def cmd_adopt(message: Message) -> None:
   user_id = message.from_user.id
-  await ensure_user(user_id)
-  existing = await get_user_cat(user_id)
-  if existing is not None:
-    await _send_adopted(message, existing)
-    return
-
   parts = (message.text or "").split(maxsplit=1)
   name = parts[1].strip() if len(parts) > 1 else "لوز"
   if len(name) > 40:
     await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
     return
 
-  cat = await _create_cat_for_user(user_id, name)
-  await _send_adopted(message, cat)
+  cat, created = await _get_or_create_cat(user_id, name)
+  await _send_adopted(message, cat, newly_adopted=created)

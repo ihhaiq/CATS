@@ -66,9 +66,116 @@ class RuntimeTests(unittest.TestCase):
         }
         card = asyncio.run(build_rich_card(None, cat, 42))
         self.assertIn("الشبع", card.html)
-        self.assertIn("الراحة والنوم", card.html)
+        self.assertIn("الراحة", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
+        self.assertIn("الشبع", card.html)
+        self.assertNotIn("الجوع:", card.html)
+
+    def test_rich_card_binds_controls_to_cat_id(self) -> None:
+        cat = {
+            "cat_id": 77,
+            "name": "Bound",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "777777",
+            "hunger": 20,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "rest_updated_at": __import__("datetime").datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("cat:77:feed", card.html)
+        self.assertIn("cat:77:play", card.html)
+        self.assertIn("cat:77:status", card.html)
+        self.assertNotIn('data="cat:feed"', card.html)
+
+    def test_rich_card_escapes_user_cat_name(self) -> None:
+        cat = {
+            "name": "<b>Test</b>",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "123456",
+            "hunger": 20,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "slept_today_hours": 0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("&lt;b&gt;Test&lt;/b&gt;", card.html)
+        self.assertNotIn("<h2><b>Test</b></h2>", card.html)
+
+    def test_lightning_only_marks_live_cooldown_bypass(self) -> None:
+        from datetime import datetime
+
+        base = {
+            "name": "Hungry",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "121212",
+            "hunger": 80,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "slept_today_hours": 0.0,
+        }
+
+        ready_cat = dict(base, last_fed=None)
+        ready_card = asyncio.run(build_rich_card(None, ready_cat, 0))
+        self.assertIn("🎯 المطلوب هسه: 🍖 إطعام", ready_card.html)
+        self.assertNotIn(">⚡ إطعام</tg-button>", ready_card.html)
+
+        cooldown_cat = dict(base, last_fed=datetime.utcnow().isoformat())
+        cooldown_card = asyncio.run(build_rich_card(None, cooldown_cat, 0))
+        self.assertIn(">⚡ إطعام</tg-button>", cooldown_card.html)
+
+    def test_sleeping_card_hides_care_actions(self) -> None:
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        cat = {
+            "name": "Sleepy",
+            "breed": "siamese",
+            "age_days": 30,
+            "id_number": "999999",
+            "hunger": 30,
+            "happiness": 80,
+            "love_bar": 90,
+            "trust": 70,
+            "boredom": 20,
+            "rest_level": 60,
+            "rest_updated_at": now.isoformat(),
+            "sleep_started_at": now.isoformat(),
+            "sleep_until": (now + timedelta(hours=1)).isoformat(),
+            "sleep_kind": "nap",
+            "sleep_planned_hours": 1.0,
+            "slept_today_hours": 0.0,
+            "sleep_day": now.date().isoformat(),
+        }
+        card = asyncio.run(build_rich_card(None, cat, 10, "sleep"))
+        self.assertIn("cat:wake", card.html)
+        self.assertIn("cat:status", card.html)
+        self.assertNotIn("cat:feed", card.html)
+        self.assertNotIn("cat:play", card.html)
+        self.assertNotIn("cat:walk", card.html)
+        self.assertNotIn("cat:talk", card.html)
 
     def test_local_store_creates_and_updates_json(self) -> None:
         from bot.config import settings

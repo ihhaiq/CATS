@@ -44,6 +44,9 @@ class Settings:
     notification_interval_minutes: int = max(
         1, int(os.getenv("NOTIFICATION_INTERVAL_MINUTES", "15"))
     )
+    wake_check_interval_minutes: int = max(
+        1, int(os.getenv("WAKE_CHECK_INTERVAL_MINUTES", "1"))
+    )
 
 
 settings = Settings()

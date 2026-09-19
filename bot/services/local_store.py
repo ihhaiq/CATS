@@ -8,6 +8,17 @@ from bot.config import settings
 from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
 _lock = asyncio.Lock()
+_action_locks: dict[int, asyncio.Lock] = {}
+
+
+def user_action_lock(user_id: int) -> asyncio.Lock:
+    """Serialize stateful operations for one cat owner/user."""
+    lock = _action_locks.get(user_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _action_locks[user_id] = lock
+    return lock
+
 
 
 def _path() -> Path:
@@ -56,6 +67,27 @@ def is_sleeping(cat: dict) -> bool:
     return bool(sleep_until and parse_time(sleep_until) > datetime.utcnow())
 
 
+def sleep_remaining_minutes(cat: dict) -> int:
+    sleep_until = cat.get("sleep_until")
+    if not sleep_until:
+        return 0
+    seconds = max(
+        0.0,
+        (parse_time(sleep_until) - datetime.utcnow()).total_seconds(),
+    )
+    return int((seconds + 59) // 60)
+
+
+def sleep_duration_text(minutes: int) -> str:
+    minutes = max(1, int(minutes))
+    if minutes < 60:
+        return f"{minutes} دقيقة"
+    hours, remainder = divmod(minutes, 60)
+    if remainder:
+        return f"{hours} ساعة و{remainder} دقيقة"
+    return f"{hours} ساعة"
+
+
 REST_FALL_PER_AWAKE_HOUR = 8.0
 REST_RECOVERY_PER_SLEEP_HOUR = 10.0
 HUNGER_RISE_PER_AWAKE_HOUR = 3.0
@@ -65,7 +97,13 @@ BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
 TRUST_FALL_PER_NEGLECT_HOUR = 0.7
 WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
-HEALTHY_SLEEP_HOURS = 8.0
+CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
+HEALTHY_SLEEP_HOURS = 16.0
+MAIN_SLEEP_REST_THRESHOLD = 35
+MAIN_SLEEP_MIN_HOURS = 4.0
+MAIN_SLEEP_MAX_HOURS = 12.5
+NAP_MIN_HOURS = 0.75
+NAP_MAX_HOURS = 2.5
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -80,30 +118,67 @@ def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
     return max(0.0, (overlap_end - overlap_start).total_seconds() / 3600)
 
 
+def _day_start(moment: datetime) -> datetime:
+    return datetime.combine(moment.date(), datetime.min.time())
+
+
 def _session_sleep_until(cat: dict, moment: datetime) -> float:
-    """Hours already slept in the current active sleep session by moment."""
+    """Hours from the active sleep session that belong to moment's UTC day."""
     started = cat.get("sleep_started_at")
     until = cat.get("sleep_until")
     if not started or not until:
         return 0.0
-    sleep_start = parse_time(started)
-    sleep_end = min(moment, parse_time(until))
+
+    day_start = _day_start(moment)
+    day_end = day_start + timedelta(days=1)
+    sleep_start = max(parse_time(started), day_start)
+    sleep_end = min(moment, parse_time(until), day_end)
     if sleep_end <= sleep_start:
         return 0.0
-    return max(0.0, (sleep_end - sleep_start).total_seconds() / 3600)
+    return (sleep_end - sleep_start).total_seconds() / 3600
 
 
 def _effective_slept_today(cat: dict, moment: datetime) -> float:
-    return float(cat.get("slept_today_hours", 0.0)) + _session_sleep_until(cat, moment)
+    saved = (
+        float(cat.get("slept_today_hours", 0.0))
+        if cat.get("sleep_day") == moment.date().isoformat()
+        else 0.0
+    )
+    return saved + _session_sleep_until(cat, moment)
 
 
-def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
-    """Only sleep beyond the healthy daily amount adds boredom."""
+def _oversleep_segment(cat: dict, start: datetime, end: datetime) -> float:
     before = _effective_slept_today(cat, start)
-    after = _effective_slept_today(cat, end)
+    slept = _sleep_overlap_hours(cat, start, end)
+    after = before + slept
     return max(0.0, after - HEALTHY_SLEEP_HOURS) - max(
         0.0, before - HEALTHY_SLEEP_HOURS
     )
+
+
+def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
+    """Only sleep beyond the healthy daily amount adds boredom, per UTC day."""
+    if end <= start:
+        return 0.0
+    if start.date() == end.date():
+        return _oversleep_segment(cat, start, end)
+
+    midnight = _day_start(end)
+    return (
+        _oversleep_segment(cat, start, midnight)
+        + _oversleep_segment(cat, midnight, end)
+    )
+
+
+def _commit_sleep_today(cat: dict, moment: datetime) -> None:
+    """Commit only the part of the finished session that belongs to today."""
+    saved = (
+        float(cat.get("slept_today_hours", 0.0))
+        if cat.get("sleep_day") == moment.date().isoformat()
+        else 0.0
+    )
+    cat["sleep_day"] = moment.date().isoformat()
+    cat["slept_today_hours"] = saved + _session_sleep_until(cat, moment)
 
 
 def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
@@ -144,51 +219,136 @@ def sleep_need_percent(cat: dict) -> int:
     return _refresh_rest(cat)
 
 
+def fullness_percent(cat: dict) -> int:
+    """User-facing fullness: 100 = full, 0 = starving."""
+    return max(0, min(100, 100 - int(cat.get("hunger", 20))))
+
+
 def wake_if_ready(cat: dict) -> bool:
     if cat.get("sleep_until") and not is_sleeping(cat):
         return finish_sleep(cat)
     return False
 
 
-def start_sleep(cat: dict) -> int:
-    now = datetime.utcnow()
+def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
+    """Plan a real-time main sleep or nap from rest deficit and today's sleep."""
+    now = moment or datetime.utcnow()
     rest = _refresh_rest(cat, now)
     today = now.date().isoformat()
-    if cat.get("sleep_day") != today:
+    if cat.get("sleep_day") != today and not is_sleeping(cat):
         cat["sleep_day"] = today
         cat["slept_today_hours"] = 0.0
 
     slept = _effective_slept_today(cat, now)
-    # Sleep duration follows the actual deficit. From 0% to 100% takes about
-    # 10 hours; from 50% it takes about 5 hours.
-    hours_needed = max(1.0, (100 - rest) / REST_RECOVERY_PER_SLEEP_HOUR)
-    if slept >= 10:
-        hours_needed = min(hours_needed, 1.5)
-    hours = min(10.0, hours_needed)
+    recovery = REST_RECOVERY_PER_SLEEP_HOUR
+    if int(cat.get("hunger", 20)) >= 85:
+        recovery *= 0.8
+    deficit_hours = max(
+        NAP_MIN_HOURS,
+        (100 - rest) / recovery,
+    )
+
+    # A deeply tired cat takes a real main sleep. Otherwise it takes one of
+    # several shorter naps, which is closer to a cat's normal daily rhythm.
+    if rest <= MAIN_SLEEP_REST_THRESHOLD:
+        kind = "main"
+        hours = max(
+            MAIN_SLEEP_MIN_HOURS,
+            min(MAIN_SLEEP_MAX_HOURS, deficit_hours),
+        )
+    else:
+        kind = "nap"
+        hours = min(NAP_MAX_HOURS, max(NAP_MIN_HOURS, deficit_hours))
+        if slept >= CAT_DAILY_SLEEP_TARGET_HOURS:
+            hours = min(hours, 1.0)
+
+    return kind, hours
+
+
+def start_sleep(cat: dict) -> int:
+    now = datetime.utcnow()
+    kind, hours = sleep_plan(cat, now)
+
+    # Starting a new session means any older undelivered wake event is stale.
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
 
     cat["sleep_started_at"] = now.isoformat()
     cat["sleep_until"] = (now + timedelta(hours=hours)).isoformat()
     cat["sleep_planned_hours"] = hours
+    cat["sleep_kind"] = kind
     cat["rest_updated_at"] = now.isoformat()
     return round(hours * 60)
 
 
-def finish_sleep(cat: dict) -> bool:
-    if not cat.get("sleep_until") or is_sleeping(cat):
+def sleep_ready_to_finish(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    """Nap wakes on time; main sleep also wakes as soon as rest is effectively full."""
+    sleep_until = cat.get("sleep_until")
+    if not sleep_until:
         return False
+
+    now = moment or datetime.utcnow()
+    if parse_time(sleep_until) <= now:
+        return True
+    if cat.get("sleep_kind") != "main":
+        return False
+
+    probe = dict(cat)
+    return _refresh_rest(probe, now) >= 98
+
+
+def finish_sleep(cat: dict) -> bool:
+    """Finish naps on time; main sleep ends only when the cat is actually rested."""
+    if not sleep_ready_to_finish(cat):
+        return False
+
     now = datetime.utcnow()
-    _refresh_rest(cat, now)
-    started = cat.get("sleep_started_at")
-    if started:
-        elapsed = max(0, (now - parse_time(started)).total_seconds() / 3600)
-        cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
-            elapsed, float(cat.get("sleep_planned_hours", 0))
-        )
+    rest = _refresh_rest(cat, now)
+
+    if cat.get("sleep_kind") == "main":
+        if rest < 98:
+            # Hunger can become severe during a long sleep and slow recovery.
+            # Extend the session from the current state instead of waking a
+            # still-tired cat just because the original estimate expired.
+            recovery = REST_RECOVERY_PER_SLEEP_HOUR
+            if int(cat.get("hunger", 20)) >= 85:
+                recovery *= 0.8
+            extra_hours = max(0.25, (98 - rest) / recovery)
+            cat["sleep_until"] = (
+                now + timedelta(hours=extra_hours)
+            ).isoformat()
+            cat["sleep_planned_hours"] = (
+                float(cat.get("sleep_planned_hours", 0.0)) + extra_hours
+            )
+            cat["rest_updated_at"] = now.isoformat()
+            return False
+
+        # Main sleep may finish before the original estimate once rest is full.
+        cat["sleep_until"] = now.isoformat()
+
+    _commit_sleep_today(cat, now)
+
+    kind = cat.get("sleep_kind") or "sleep"
+    cat["last_sleep_kind"] = kind
+    cat["wake_notice_pending"] = True
+    cat["wake_notice_kind"] = kind
+    cat["wake_notice_at"] = now.isoformat()
+    cat["wake_notice_sent_to"] = []
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
+    # A natural wake is a fresh lifecycle event; old need-notification
+    # suppression must not hide the next state update.
+    cat["last_notified_state"] = None
+    cat["last_notified_at"] = None
     return True
 
 
@@ -197,15 +357,16 @@ def wake_now(cat: dict) -> bool:
         return False
     now = datetime.utcnow()
     _refresh_rest(cat, now)
-    started = cat.get("sleep_started_at")
-    if started:
-        elapsed = max(0, (now - parse_time(started)).total_seconds() / 3600)
-        cat["slept_today_hours"] = float(cat.get("slept_today_hours", 0)) + min(
-            elapsed, float(cat.get("sleep_planned_hours", 0))
-        )
+    _commit_sleep_today(cat, now)
+    cat["last_sleep_kind"] = cat.get("sleep_kind") or "sleep"
     cat["sleep_until"] = None
     cat["sleep_started_at"] = None
     cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
     cat["last_wake_at"] = now.isoformat()
     cat["rest_updated_at"] = now.isoformat()
     return True
@@ -218,7 +379,11 @@ def clear_action_notice(cat: dict) -> None:
 
 
 def _walk_hours(cat: dict, moment: datetime) -> float:
-    value = cat.get("last_walk")
+    value = (
+        cat.get("last_walk")
+        or cat.get("adopted_at")
+        or cat.get("created_at")
+    )
     if not value:
         return 0.0
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
@@ -231,8 +396,32 @@ def _social_hours(cat: dict, moment: datetime) -> float:
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
 
 
+def mark_fled_if_needed(cat: dict) -> bool:
+    """Make fleeing a single runtime state, independent of which UI is used."""
+    if cat.get("is_fled"):
+        return True
+    if int(cat.get("love_bar", 100)) > 0:
+        return False
+
+    cat["is_fled"] = True
+    cat["fled_at"] = cat.get("fled_at") or now_iso()
+    cat["sleep_until"] = None
+    cat["sleep_started_at"] = None
+    cat["sleep_planned_hours"] = 0
+    cat["sleep_kind"] = None
+    cat.pop("wake_notice_pending", None)
+    cat.pop("wake_notice_kind", None)
+    cat.pop("wake_notice_at", None)
+    cat.pop("wake_notice_sent_to", None)
+    clear_action_notice(cat)
+    return True
+
+
 def apply_decay(cat: dict) -> None:
     """Advance needs in small time slices so neglect is never backdated."""
+    if cat.get("is_fled"):
+        return
+
     now = datetime.utcnow()
     last_decay = parse_time(
         cat.get("last_decay_at") or cat.get("created_at") or cat["last_fed"]
@@ -240,6 +429,7 @@ def apply_decay(cat: dict) -> None:
     elapsed = max(0.0, (now - last_decay).total_seconds() / 3600)
     if elapsed <= 0:
         _refresh_rest(cat, now)
+        mark_fled_if_needed(cat)
         return
 
     rest_before = int(cat.get("rest_level", 100))
@@ -344,6 +534,7 @@ def apply_decay(cat: dict) -> None:
     cat["trust"] = max(0, min(100, round(trust)))
     cat["boredom"] = max(0, min(100, round(boredom)))
     cat["last_decay_at"] = now.isoformat()
+    mark_fled_if_needed(cat)
 
 
 def _routine_streak(cat: dict, action: str, moment: datetime) -> int:
@@ -358,6 +549,16 @@ def _routine_streak(cat: dict, action: str, moment: datetime) -> int:
     if previous == action and recent:
         return int(cat.get("same_action_streak", 0)) + 1
     return 1
+
+
+def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
+    previous_at = cat.get("last_care_at")
+    if cat.get("last_care_action") != action or not previous_at:
+        return False
+    recent = (
+        moment - parse_time(previous_at)
+    ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
+    return recent and int(cat.get("same_action_streak", 0)) >= 5
 
 
 def apply_care_effects(cat: dict, action: str) -> None:
@@ -383,10 +584,27 @@ def apply_care_effects(cat: dict, action: str) -> None:
         if streak >= 3 and not meaningful:
             cat["boredom"] = min(100, boredom + 4)
     elif action == "play":
-        meaningful = boredom >= 20 or happiness_before <= 80
-        cat["happiness"] = min(100, happiness_before + 24)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 5)
-        cat["boredom"] = max(0, boredom - round(35 * novelty))
+        # Play has diminishing returns. Repeating it too often inside the
+        # routine window eventually becomes boring instead of stimulating.
+        meaningful = (boredom >= 20 or happiness_before <= 80) and streak < 5
+        if streak == 1:
+            happiness_gain, love_gain, boredom_delta = 24, 5, -35
+        elif streak == 2:
+            happiness_gain, love_gain, boredom_delta = 20, 4, -28
+        elif streak == 3:
+            happiness_gain, love_gain, boredom_delta = 12, 3, -16
+        elif streak == 4:
+            happiness_gain, love_gain, boredom_delta = 6, 2, -6
+        else:
+            happiness_gain, love_gain = 0, 0
+            boredom_delta = min(20, 8 + (streak - 5) * 4)
+
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
+        if streak >= 5:
+            cat["boredom"] = min(100, max(45, boredom + boredom_delta))
+        else:
+            cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + 7)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
     elif action == "walk":
@@ -397,9 +615,22 @@ def apply_care_effects(cat: dict, action: str) -> None:
         cat["hunger"] = min(100, hunger_before + 10)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 12)
     elif action == "talk":
-        meaningful = boredom >= 15 or happiness_before <= 85 or trust <= 65
-        cat["happiness"] = min(100, happiness_before + 7)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 3)
+        meaningful = (
+            boredom >= 15
+            or happiness_before <= 85
+            or trust <= 65
+            or int(cat.get("love_bar", 100)) <= 50
+        )
+        if streak == 1:
+            happiness_gain, love_gain = 7, 3
+        elif streak == 2:
+            happiness_gain, love_gain = 5, 2
+        elif streak == 3:
+            happiness_gain, love_gain = 3, 1
+        else:
+            happiness_gain, love_gain = 1, 0
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
         cat["boredom"] = max(0, boredom - round(25 * novelty))
         cat["last_social_at"] = moment.isoformat()
     else:
@@ -414,13 +645,131 @@ def apply_care_effects(cat: dict, action: str) -> None:
     elif streak >= 3:
         trust_gain = max(0, trust_gain - (streak - 2))
     cat["trust"] = min(100, trust + trust_gain)
+    cat["last_care_meaningful"] = bool(meaningful)
 
     # Repeating one interaction inside a short window becomes less stimulating.
-    if action in {"play", "talk", "walk"} and streak >= 4:
+    if action in {"talk", "walk"} and streak >= 4:
         cat["boredom"] = min(
             100,
             int(cat.get("boredom", 0)) + min(15, (streak - 3) * 4),
         )
+
+
+def _attention_due(cat: dict, moment: datetime) -> bool:
+    """Whether the cat currently needs a real social interaction."""
+    boredom = int(cat.get("boredom", 10))
+    happiness = int(cat.get("happiness", 100))
+    trust = int(cat.get("trust", 60))
+    love = int(cat.get("love_bar", 100))
+
+    # Relationship or mood trouble is actionable immediately. Mild loneliness
+    # still needs time without interaction before it becomes a real need.
+    if love <= 30 or trust <= 35 or happiness <= 40 or boredom >= 65:
+        return True
+
+    social_hours = _social_hours(cat, moment)
+    return social_hours >= 10 and (boredom >= 25 or happiness <= 50)
+
+
+def is_action_cooldown_bypassed(cat: dict, action: str) -> bool:
+    """True only when a current need is actively overriding a live cooldown."""
+    if not can_bypass_action_cooldown(cat, action):
+        return False
+
+    specs = {
+        "feed": ("last_fed", settings.feed_cooldown),
+        "play": ("last_played", settings.play_cooldown),
+        "walk": ("last_walk", settings.walk_cooldown),
+        "talk": ("last_talk", settings.talk_cooldown),
+    }
+    spec = specs.get(action)
+    if spec is None:
+        return False
+
+    timestamp_key, cooldown = spec
+    last_action = cat.get(timestamp_key)
+    if not last_action:
+        return False
+
+    elapsed = (datetime.utcnow() - parse_time(last_action)).total_seconds()
+    return elapsed < cooldown
+
+
+def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
+    """Needs override cooldowns; optional interactions still respect them."""
+    moment = datetime.utcnow()
+    if action == "feed":
+        return int(cat.get("hunger", 20)) >= settings.hunger_alert_threshold
+    if action == "play":
+        return (
+            int(cat.get("boredom", 10)) >= 35
+            and not _action_overused(cat, "play", moment)
+        )
+    if action == "walk":
+        return _walk_hours(cat, moment) >= WALK_DUE_HOURS
+    if action == "talk":
+        return _attention_due(cat, moment)
+    return False
+
+
+def action_block_reason(cat: dict, action: str) -> str | None:
+    """Return a higher-priority need that makes an action illogical."""
+    hunger = int(cat.get("hunger", 20))
+    if action == "feed" and hunger <= 15:
+        return "full"
+    if action in {"play", "walk"}:
+        if hunger >= 90:
+            return "starving"
+        if sleep_need_percent(cat) <= 30:
+            return "tired"
+    if action == "play" and _action_overused(cat, "play", datetime.utcnow()):
+        return "bored_of_play"
+    return None
+
+
+def recommended_action(cat: dict) -> str | None:
+    """Choose one useful next action for the current state."""
+    if is_sleeping(cat):
+        return None
+
+    hunger = int(cat.get("hunger", 20))
+    rest = sleep_need_percent(cat)
+    moment = datetime.utcnow()
+
+    if hunger >= settings.hunger_alert_threshold:
+        return "feed"
+    if rest <= 30:
+        return "sleep"
+    if _attention_due(cat, moment):
+        return "talk"
+    if _walk_hours(cat, moment) >= WALK_DUE_HOURS:
+        return "walk"
+    if int(cat.get("boredom", 10)) >= 35:
+        if _action_overused(cat, "play", moment):
+            return "talk"
+        return "play"
+    if rest <= 50:
+        return "sleep"
+    return None
+
+
+def care_reward_points(
+    cat: dict,
+    action: str,
+    *,
+    bypassed_cooldown: bool = False,
+) -> int:
+    """Same reward on every surface; need-rescue bypasses never farm points."""
+    if bypassed_cooldown or not bool(cat.get("last_care_meaningful", False)):
+        return 0
+    if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
+        return 0
+    return {
+        "feed": 5,
+        "play": 5,
+        "walk": 10,
+        "talk": 3,
+    }.get(action, 0)
 
 
 def collect_needs(cat: dict) -> list[str]:
@@ -460,11 +809,10 @@ def collect_needs(cat: dict) -> list[str]:
 
     moment = datetime.utcnow()
     walk_hours = _walk_hours(cat, moment)
-    if walk_hours >= WALK_DUE_HOURS and happiness <= 80:
+    if walk_hours >= WALK_DUE_HOURS:
         needs.append("walk_due")
 
-    social_hours = _social_hours(cat, moment)
-    if social_hours >= 10 and 25 <= boredom < 35:
+    if _attention_due(cat, moment):
         needs.append("attention_due")
 
     if boredom >= 85:
@@ -544,6 +892,39 @@ async def get_user_cat(user_id: int) -> dict | None:
     async with _lock:
         data = _read()
         return next((cat for cat in data["cats"] if cat["owner_id"] == user_id and not cat["is_fled"]), None)
+
+
+async def get_cat_by_id(
+    cat_id: int,
+    *,
+    include_fled: bool = False,
+) -> dict | None:
+    async with _lock:
+        data = _read()
+        return next(
+            (
+                cat
+                for cat in data["cats"]
+                if int(cat.get("cat_id", 0)) == int(cat_id)
+                and (include_fled or not cat.get("is_fled"))
+            ),
+            None,
+        )
+
+
+async def get_latest_cat_for_user(
+    user_id: int,
+    *,
+    include_fled: bool = True,
+) -> dict | None:
+    async with _lock:
+        cats = [
+            cat
+            for cat in _read()["cats"]
+            if int(cat.get("owner_id", 0)) == int(user_id)
+            and (include_fled or not cat.get("is_fled"))
+        ]
+        return max(cats, key=lambda cat: int(cat.get("cat_id", 0))) if cats else None
 
 
 async def get_active_cats() -> list[dict]:

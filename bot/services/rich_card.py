@@ -1,4 +1,5 @@
 """Rich Telegram card shared by private chat and Guest Mode."""
+import html
 from aiogram.types import (
     InputMediaPhoto,
     InputMediaVideo,
@@ -6,8 +7,28 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
-from bot.services.local_store import collect_needs, is_sleeping, sleep_need_percent
+from bot.services.local_store import (
+    collect_needs,
+    fullness_percent,
+    is_action_cooldown_bypassed,
+    is_sleeping,
+    recommended_action,
+    sleep_duration_text,
+    sleep_need_percent,
+    sleep_remaining_minutes,
+)
 from bot.services.media_runtime import resolve_cat_media
+
+
+def build_fled_card(cat: dict) -> InputRichMessage:
+    name = html.escape(str(cat.get("name", "قطتك")))
+    return InputRichMessage(
+        html=(
+            f"<h2>💨 هربت {name}</h2>"
+            "<p>وصل الحب إلى 0 بسبب الإهمال، لذلك ما عادت أفعال العناية متاحة.</p>"
+        ),
+        is_rtl=True,
+    )
 
 
 async def build_rich_card(
@@ -42,14 +63,138 @@ async def build_rich_card(
         media_markup = "<p>الصورة الواقعية ستظهر بعد إضافة ملف القطة.</p>"
 
     sleeping = is_sleeping(cat)
-    sleep_note = "<p>😴 القطة نائمة. كل الأفعال متوقفة حتى تستيقظ.</p>" if sleeping else ""
+    if sleeping:
+        sleep_kind = cat.get("sleep_kind")
+        sleep_label = {
+            "main": "نوم رئيسي",
+            "nap": "قيلولة",
+        }.get(sleep_kind, "نوم")
+        remaining = sleep_duration_text(sleep_remaining_minutes(cat))
+        sleep_note = (
+            f"<p>😴 القطة في {sleep_label}. "
+            f"⏳ باقي تقريباً {remaining}، وبعدها تصحى من نفسها.</p>"
+        )
+    else:
+        sleep_note = ""
     notice = cat.get("action_notice", "")
-    notice_html = f"<p><b>{notice}</b></p>" if notice else ""
-    wake_action = "wake" if sleeping else "sleep"
-    wake_label = "إيقاظ" if sleeping else "نوم"
-    fullness = 100 - cat["hunger"]
+    notice_html = f"<p><b>{html.escape(str(notice))}</b></p>" if notice else ""
+    hunger = int(cat.get("hunger", 20))
+    happiness = int(cat.get("happiness", 100))
+    love = int(cat.get("love_bar", 100))
+    trust = int(cat.get("trust", 60))
+    boredom = int(cat.get("boredom", 10))
+    fullness = fullness_percent(cat)
     sleep_need = sleep_need_percent(cat)
+
+    def stat_cell(value: str, highlight: bool) -> str:
+        return f"<mark><b>{value}</b></mark>" if highlight else value
+
+    action_highlights = {
+        "feed": {"fullness", "happiness", "love", "trust"},
+        "play": {
+            "fullness",
+            "happiness",
+            "love",
+            "trust",
+            "boredom",
+            "rest",
+        },
+        "walk": {
+            "fullness",
+            "happiness",
+            "love",
+            "trust",
+            "boredom",
+            "rest",
+        },
+        "talk": {"happiness", "love", "trust", "boredom"},
+        "sleep": {"rest"},
+    }.get(media_kind, set())
+
+    fullness_cell = stat_cell(
+        f"{fullness}%",
+        "fullness" in action_highlights or hunger >= 70,
+    )
+    happiness_cell = stat_cell(
+        f"{happiness}%",
+        "happiness" in action_highlights or happiness <= 40,
+    )
+    love_cell = stat_cell(
+        f"{love}%",
+        "love" in action_highlights or love <= 30,
+    )
+    trust_cell = stat_cell(
+        f"{trust}%",
+        "trust" in action_highlights or trust <= 35,
+    )
+    boredom_cell = stat_cell(
+        f"{boredom}%",
+        "boredom" in action_highlights or boredom >= 35,
+    )
+    sleep_cell = stat_cell(
+        f"{sleep_need}%",
+        "rest" in action_highlights or (not sleeping and sleep_need <= 50),
+    )
+
     needs = collect_needs(cat)
+    next_action = recommended_action(cat)
+    action_labels = {
+        "feed": "🍖 إطعام",
+        "play": "🎾 لعب",
+        "walk": "🌿 نزهة",
+        "talk": "💬 تحدث",
+        "sleep": "😴 نوم",
+    }
+    recommendation_html = (
+        f"<p><b>🎯 المطلوب هسه: {action_labels[next_action]}</b></p>"
+        if next_action
+        else ""
+    )
+    feed_label = (
+        "⚡ إطعام"
+        if is_action_cooldown_bypassed(cat, "feed")
+        else "إطعام"
+    )
+    play_label = (
+        "⚡ لعب"
+        if is_action_cooldown_bypassed(cat, "play")
+        else "لعب"
+    )
+    walk_label = (
+        "⚡ نزهة"
+        if is_action_cooldown_bypassed(cat, "walk")
+        else "نزهة"
+    )
+    talk_label = (
+        "⚡ تحدث"
+        if is_action_cooldown_bypassed(cat, "talk")
+        else "تحدث"
+    )
+    sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
+    cat_id = cat.get("cat_id")
+
+    def action_data(action: str) -> str:
+        return f"cat:{cat_id}:{action}" if cat_id else f"cat:{action}"
+    if sleeping:
+        action_buttons_html = f"""
+<tg-button-row align="center">
+<tg-button type="callback_data" style="primary" data="{action_data('wake')}">إيقاظ</tg-button>
+<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
+</tg-button-row>
+""".strip()
+    else:
+        action_buttons_html = f"""
+<tg-button-row align="center">
+<tg-button type="callback_data" style="success" data="{action_data('feed')}">{feed_label}</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('play')}">{play_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('walk')}">{walk_label}</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+<tg-button type="callback_data" data="{action_data('talk')}">{talk_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('sleep')}">{sleep_button_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
+</tg-button-row>
+""".strip()
     hint_map = {
         "starving": "🚨🍖 جوعها شديد جداً.",
         "hungry": "🍗 جائعة وتحتاج أكل.",
@@ -69,15 +214,32 @@ async def build_rich_card(
         "sleepy": "🥱 بدت تنعس.",
         "peckish": "🥣 بدت تجوع شوي.",
     }
-    priority = [
+    need_priority_by_action = {
+        "feed": ["starving", "hungry", "peckish"],
+        "sleep": ["exhausted", "tired", "sleepy"],
+        "talk": [
+            "love_critical",
+            "trust_critical",
+            "very_sad",
+            "very_bored",
+            "love_low",
+            "trust_low",
+            "sad",
+            "bored",
+            "attention_due",
+        ],
+        "walk": ["walk_due"],
+        "play": ["very_bored", "bored", "restless"],
+    }
+    fallback_priority = [
         "starving",
+        "hungry",
         "exhausted",
+        "tired",
         "love_critical",
         "trust_critical",
         "very_sad",
         "very_bored",
-        "hungry",
-        "tired",
         "love_low",
         "trust_low",
         "sad",
@@ -88,39 +250,41 @@ async def build_rich_card(
         "restless",
         "peckish",
     ]
-    primary_need = next((item for item in priority if item in needs), None)
+    preferred = need_priority_by_action.get(next_action, [])
+    primary_need = next(
+        (item for item in preferred if item in needs),
+        None,
+    )
+    if primary_need is None:
+        primary_need = next(
+            (item for item in fallback_priority if item in needs),
+            None,
+        )
     state_hint = (
         hint_map.get(primary_need, "")
         if primary_need
         else "😺 حالتها مستقرة هسه."
     )
-    html = f"""
-<h2>{cat['name']}</h2>
-<p>السلالة: {cat['breed']} | #{cat['id_number']}</p>
+    html_markup = f"""
+<h2>{html.escape(str(cat['name']))}</h2>
+<p>السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}</p>
 <hr/>
 {media_markup}
 <hr/>
 <table bordered striped compact>
 <tr><th>الحالة</th><th>النسبة</th></tr>
-<tr><td>الشبع</td><td>{fullness}%</td></tr>
-<tr><td>السعادة</td><td>{cat['happiness']}%</td></tr>
-<tr><td>الحب</td><td>{cat['love_bar']}%</td></tr>
-<tr><td>الثقة</td><td>{cat.get('trust', 60)}%</td></tr>
-<tr><td>الملل</td><td>{cat.get('boredom', 10)}%</td></tr>
-<tr><td>الراحة والنوم</td><td>{sleep_need}%</td></tr>
+<tr><td>الشبع</td><td>{fullness_cell}</td></tr>
+<tr><td>السعادة</td><td>{happiness_cell}</td></tr>
+<tr><td>الحب</td><td>{love_cell}</td></tr>
+<tr><td>الثقة</td><td>{trust_cell}</td></tr>
+<tr><td>الملل</td><td>{boredom_cell}</td></tr>
+<tr><td>الراحة</td><td>{sleep_cell}</td></tr>
 </table>
 <p><b>{state_hint}</b></p>
+{recommendation_html}
 <p>🐾 العملة القططية: {points}</p>
-<tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="cat:feed">إطعام</tg-button>
-<tg-button type="callback_data" style="primary" data="cat:play">لعب</tg-button>
-<tg-button type="callback_data" data="cat:walk">نزهة</tg-button>
-</tg-button-row>
-<tg-button-row align="center">
-<tg-button type="callback_data" data="cat:talk">تحدث</tg-button>
-<tg-button type="callback_data" data="cat:{wake_action}">{wake_label}</tg-button>
-</tg-button-row>
+{action_buttons_html}
 {sleep_note}
 {notice_html}
 """.strip()
-    return InputRichMessage(html=html, is_rtl=True, media=media_list)
+    return InputRichMessage(html=html_markup, is_rtl=True, media=media_list)
