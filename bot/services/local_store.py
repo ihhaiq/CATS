@@ -167,9 +167,7 @@ def start_sleep(cat: dict) -> int:
     hours = min(10.0, hours_needed)
 
     cat["sleep_started_at"] = now.isoformat()
-    cat["sleep_until"] = datetime.fromtimestamp(
-        now.timestamp() + hours * 3600
-    ).isoformat()
+    cat["sleep_until"] = (now + timedelta(hours=hours)).isoformat()
     cat["sleep_planned_hours"] = hours
     cat["rest_updated_at"] = now.isoformat()
     return round(hours * 60)
