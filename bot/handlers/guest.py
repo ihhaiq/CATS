@@ -247,6 +247,7 @@ async def _guest_message_locked(message: Message) -> None:
             cat = {
                 "owner_id": user_id,
                 "partner_id": None,
+                "adopted_at": stamp,
                 "name": argument,
                 "title": "الأليف",
                 "id_number": str(random.randint(100000, 999999)),
