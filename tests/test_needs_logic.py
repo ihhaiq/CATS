@@ -118,6 +118,18 @@ class CoupledNeedsTests(unittest.TestCase):
             apply_care_effects(cat, "feed")
         self.assertGreater(cat["boredom"], 20)
 
+    def test_repeated_play_eventually_causes_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 20
+        previous = cat["boredom"]
+        for index in range(6):
+            if index:
+                cat["last_care_at"] = datetime.utcnow().isoformat()
+            apply_care_effects(cat, "play")
+            if index == 3:
+                previous = cat["boredom"]
+        self.assertGreater(cat["boredom"], previous)
+
     def test_routine_streak_expires_after_six_hours(self) -> None:
         cat = old_cat(0)
         cat["last_care_action"] = "talk"
