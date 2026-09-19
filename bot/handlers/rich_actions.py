@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery
 from bot.config import settings
 from bot.services.economy import check_cooldown
 from bot.services.local_store import (
+    apply_care_effects,
     apply_decay,
     award_points,
     clear_action_notice,
@@ -124,8 +125,8 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     # Any new action invalidates an older temporary notice/task.
     clear_action_notice(cat)
-    woke = finish_sleep(cat)
     apply_decay(cat)
+    woke = finish_sleep(cat)
     if woke:
         await update_cat(cat)
 
@@ -201,8 +202,8 @@ async def handle_rich_action(query: CallbackQuery) -> None:
     if refusal_until:
         cat.pop("action_refusal_until", None)
     elif (
-        sleep_need_percent(cat) <= 65
-        and action in {"feed", "play", "walk", "talk"}
+        sleep_need_percent(cat) <= 20
+        and action in {"play", "walk"}
     ):
         notice_token = _set_action_notice(
             cat,
@@ -238,21 +239,12 @@ async def handle_rich_action(query: CallbackQuery) -> None:
                 show_alert=True,
             )
             return
-        cat["hunger"] = max(0, cat["hunger"] - 30)
+        apply_care_effects(cat, "feed")
         cat["last_fed"] = datetime.utcnow().isoformat()
         points = random.choice([0, 0, 2, 5, 8])
 
-    elif action in {"play", "walk"} and random.random() < 0.2:
-        media_kind = "cat_angry_sleep"
-        points = 0
-        notice_token = _set_action_notice(cat, "😾 القطة تريد النوم!")
-        cat["action_refusal_until"] = (
-            datetime.utcnow().timestamp() + random.randint(120, 300)
-        )
-
     elif action == "play":
-        cat["happiness"] = min(100, cat["happiness"] + 25)
-        cat["hunger"] = min(100, cat["hunger"] + 5)
+        apply_care_effects(cat, "play")
         cat["last_played"] = datetime.utcnow().isoformat()
         points = random.choice([0, 1, 3, 5, 10])
         if random.random() < 0.15:
@@ -262,12 +254,12 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             )
 
     elif action == "walk":
-        cat["happiness"] = min(100, cat["happiness"] + 15)
+        apply_care_effects(cat, "walk")
         cat["last_walk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 2, 5, 10, 15])
 
     elif action == "talk":
-        cat["happiness"] = min(100, cat["happiness"] + 5)
+        apply_care_effects(cat, "talk")
         points = random.choice([0, 1, 2, 4])
         if random.random() < 0.15:
             notice_token = _set_action_notice(
@@ -276,10 +268,10 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             )
 
     elif action == "sleep":
-        if cat["hunger"] > 70 or cat["happiness"] < 30:
+        if cat["hunger"] >= 90:
             notice_token = _set_action_notice(
                 cat,
-                "😾 القطة لا تستطيع النوم الآن، إنها تحتاج رعاية!",
+                "😾 القطة جائعة جداً وما تكدر تنام قبل ما تاكل!",
             )
             media_kind = "cat_angry_sleep"
             await update_cat(cat)
