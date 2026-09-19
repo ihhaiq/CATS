@@ -287,7 +287,6 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             return
 
         start_sleep(cat)
-        cat["wake_attempts"] = 0
         points = 0
         media_kind = "sleep"
         if rest_now <= 25:
