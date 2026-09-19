@@ -12,6 +12,7 @@ from bot.services.local_store import (
     get_user_cat,
     sleep_need_percent,
     update_cat,
+    user_action_lock,
 )
 
 router = Router(name="inline")
@@ -55,31 +56,35 @@ async def inline_cat(inline_query: InlineQuery) -> None:
         return
 
     user_id = inline_query.from_user.id
-    await ensure_user(user_id)
-    cat = await get_user_cat(user_id)
-    if cat is None:
-        text = "🐾 ما عندك قطة بعد. أرسل /adopt اسم_القطة إلى البوت أولاً."
-        title = "لا توجد قطة"
-    else:
-        apply_decay(cat)
-        finish_sleep(cat)
-        await update_cat(cat)
-        if cat.get("is_fled"):
-            title = "💨 هربت قطتك"
-            text = "وصل الحب إلى 0 بسبب الإهمال، وما عادت أفعال العناية متاحة."
-        elif action in {"feed", "play", "walk"}:
-            preview = dict(cat)
-            apply_care_effects(preview, action)
-            title = {
-                "feed": "معاينة الإطعام",
-                "play": "معاينة اللعب",
-                "walk": "معاينة النزهة",
-            }[action]
-            icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
-            text = f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n" + _state_text(preview)
+    async with user_action_lock(user_id):
+        await ensure_user(user_id)
+        cat = await get_user_cat(user_id)
+        if cat is None:
+            text = "🐾 ما عندك قطة بعد. أرسل /adopt اسم_القطة إلى البوت أولاً."
+            title = "لا توجد قطة"
         else:
-            title = "حالة قطتك"
-            text = _state_text(cat)
+            apply_decay(cat)
+            finish_sleep(cat)
+            await update_cat(cat)
+            if cat.get("is_fled"):
+                title = "💨 هربت قطتك"
+                text = "وصل الحب إلى 0 بسبب الإهمال، وما عادت أفعال العناية متاحة."
+            elif action in {"feed", "play", "walk"}:
+                preview = dict(cat)
+                apply_care_effects(preview, action)
+                title = {
+                    "feed": "معاينة الإطعام",
+                    "play": "معاينة اللعب",
+                    "walk": "معاينة النزهة",
+                }[action]
+                icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
+                text = (
+                    f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n"
+                    + _state_text(preview)
+                )
+            else:
+                title = "حالة قطتك"
+                text = _state_text(cat)
 
     result = InlineQueryResultArticle(
         id=f"catibot-{action}",
