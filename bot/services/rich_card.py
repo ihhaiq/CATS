@@ -60,6 +60,8 @@ async def build_rich_card(
 <tr><td>الشبع</td><td>{fullness}%</td></tr>
 <tr><td>السعادة</td><td>{cat['happiness']}%</td></tr>
 <tr><td>الحب</td><td>{cat['love_bar']}%</td></tr>
+<tr><td>الثقة</td><td>{cat.get('trust', 60)}%</td></tr>
+<tr><td>الملل</td><td>{cat.get('boredom', 10)}%</td></tr>
 <tr><td>الراحة والنوم</td><td>{sleep_need}%</td></tr>
 </table>
 <p>🐾 العملة القططية: {points}</p>
