@@ -283,17 +283,33 @@ def start_sleep(cat: dict) -> int:
     return round(hours * 60)
 
 
+def sleep_ready_to_finish(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    """Nap wakes on time; main sleep also wakes as soon as rest is effectively full."""
+    sleep_until = cat.get("sleep_until")
+    if not sleep_until:
+        return False
+
+    now = moment or datetime.utcnow()
+    if parse_time(sleep_until) <= now:
+        return True
+    if cat.get("sleep_kind") != "main":
+        return False
+
+    probe = dict(cat)
+    return _refresh_rest(probe, now) >= 98
+
+
 def finish_sleep(cat: dict) -> bool:
     """Finish a nap on time or a main sleep when fully rested/on time."""
-    if not cat.get("sleep_until"):
+    if not sleep_ready_to_finish(cat):
         return False
 
     now = datetime.utcnow()
     if is_sleeping(cat):
-        if cat.get("sleep_kind") != "main":
-            return False
-        if _refresh_rest(cat, now) < 98:
-            return False
+        _refresh_rest(cat, now)
         # Main sleep can end early as soon as the rest meter is effectively full.
         cat["sleep_until"] = now.isoformat()
     else:
