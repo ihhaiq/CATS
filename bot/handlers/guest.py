@@ -27,6 +27,7 @@ from bot.services.local_store import (
     sleep_need_percent,
     start_sleep,
     update_cat,
+    user_action_lock,
     wake_now,
 )
 from bot.services.rich_card import build_rich_card
@@ -159,6 +160,15 @@ def _requested_command(message: Message) -> tuple[str | None, str]:
 
 @router.guest_message()
 async def guest_message(message: Message) -> None:
+    caller = message.from_user or message.guest_bot_caller_user
+    if caller is None:
+        await _guest_message_locked(message)
+        return
+    async with user_action_lock(caller.id):
+        await _guest_message_locked(message)
+
+
+async def _guest_message_locked(message: Message) -> None:
     if not message.guest_query_id:
         logger.warning("Guest update without guest_query_id: %r", message.text)
         return
