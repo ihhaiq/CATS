@@ -79,6 +79,8 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "slept_today_hours": 10.0,
     "sleep_until": None,
     "last_wake_at": stamp,
+    "rest_level": 100,
+    "rest_updated_at": stamp,
   }
   await create_cat(cat)
   return cat
