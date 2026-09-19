@@ -49,6 +49,18 @@ async def build_rich_card(
     wake_label = "إيقاظ" if sleeping else "نوم"
     fullness = 100 - cat["hunger"]
     sleep_need = sleep_need_percent(cat)
+    feed_highlight = media_kind == "feed"
+    sleep_highlight = media_kind == "sleep"
+    fullness_cell = (
+        f"<mark><b>{fullness}%</b></mark>"
+        if feed_highlight
+        else f"{fullness}%"
+    )
+    sleep_cell = (
+        f"<mark><b>{sleep_need}%</b></mark>"
+        if sleep_highlight
+        else f"{sleep_need}%"
+    )
     needs = collect_needs(cat)
     hint_map = {
         "starving": "🚨🍖 جوعها شديد جداً.",
@@ -102,12 +114,12 @@ async def build_rich_card(
 <hr/>
 <table bordered striped compact>
 <tr><th>الحالة</th><th>النسبة</th></tr>
-<tr><td>الشبع</td><td>{fullness}%</td></tr>
+<tr><td>الشبع</td><td>{fullness_cell}</td></tr>
 <tr><td>السعادة</td><td>{cat['happiness']}%</td></tr>
 <tr><td>الحب</td><td>{cat['love_bar']}%</td></tr>
 <tr><td>الثقة</td><td>{cat.get('trust', 60)}%</td></tr>
 <tr><td>الملل</td><td>{cat.get('boredom', 10)}%</td></tr>
-<tr><td>الراحة والنوم</td><td>{sleep_need}%</td></tr>
+<tr><td>الراحة والنوم</td><td>{sleep_cell}</td></tr>
 </table>
 <p><b>{state_hint}</b></p>
 <p>🐾 العملة القططية: {points}</p>
