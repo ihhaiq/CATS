@@ -68,7 +68,30 @@ async def build_rich_card(
         "sleepy": "🥱 بدت تنعس.",
         "peckish": "🥣 بدت تجوع شوي.",
     }
-    state_hint = hint_map.get(needs[0], "") if needs else "😺 حالتها مستقرة هسه."
+    priority = [
+        "starving",
+        "exhausted",
+        "love_critical",
+        "trust_critical",
+        "very_sad",
+        "very_bored",
+        "hungry",
+        "tired",
+        "love_low",
+        "trust_low",
+        "sad",
+        "bored",
+        "walk_due",
+        "sleepy",
+        "restless",
+        "peckish",
+    ]
+    primary_need = next((item for item in priority if item in needs), None)
+    state_hint = (
+        hint_map.get(primary_need, "")
+        if primary_need
+        else "😺 حالتها مستقرة هسه."
+    )
     html = f"""
 <h2>{cat['name']}</h2>
 <p>السلالة: {cat['breed']} | #{cat['id_number']}</p>
