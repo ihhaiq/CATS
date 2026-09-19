@@ -437,6 +437,11 @@ def apply_care_effects(cat: dict, action: str) -> None:
         )
 
 
+def can_bypass_feed_cooldown(cat: dict) -> bool:
+    """A genuinely hungry cat can always be fed, regardless of cooldown."""
+    return int(cat.get("hunger", 20)) >= settings.hunger_alert_threshold
+
+
 def collect_needs(cat: dict) -> list[str]:
     """One severity tier per need, ordered from relationship to physical needs."""
     needs: list[str] = []
