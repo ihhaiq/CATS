@@ -1,7 +1,7 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from bot.config import settings
@@ -128,7 +128,10 @@ def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
     elapsed = max(0.0, (moment - anchor).total_seconds() / 3600)
     asleep = min(elapsed, _sleep_overlap_hours(cat, anchor, moment))
     awake = max(0.0, elapsed - asleep)
-    rest += asleep * REST_RECOVERY_PER_SLEEP_HOUR
+    recovery = REST_RECOVERY_PER_SLEEP_HOUR
+    if int(cat.get("hunger", 20)) >= 85:
+        recovery *= 0.8
+    rest += asleep * recovery
     rest -= awake * REST_FALL_PER_AWAKE_HOUR
 
     cat["rest_level"] = max(0, min(100, round(rest)))
@@ -246,7 +249,7 @@ def apply_decay(cat: dict) -> None:
     cursor = last_decay
     total_seconds = max(1.0, (now - last_decay).total_seconds())
     while cursor < now:
-        step_end = min(now, datetime.fromtimestamp(cursor.timestamp() + 3600))
+        step_end = min(now, cursor + timedelta(hours=1))
         step_hours = (step_end - cursor).total_seconds() / 3600
         asleep = min(step_hours, _sleep_overlap_hours(cat, cursor, step_end))
         awake = max(0.0, step_hours - asleep)
@@ -270,6 +273,10 @@ def apply_decay(cat: dict) -> None:
 
         # Happiness is affected by actual current needs, not just elapsed time.
         happiness_loss = awake * 0.6
+        if hunger >= 75:
+            happiness_loss += asleep * 0.20
+        if hunger >= 90:
+            happiness_loss += asleep * 0.20
         if hunger >= 55:
             happiness_loss += awake * 0.5
         if hunger >= 75:
@@ -353,6 +360,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
     boredom = int(cat.get("boredom", 10))
     trust = int(cat.get("trust", 60))
+    novelty = max(0.25, 1.0 - max(0, streak - 2) * 0.25)
     hunger_before = int(cat.get("hunger", 20))
     happiness_before = int(cat.get("happiness", 100))
 
@@ -368,21 +376,21 @@ def apply_care_effects(cat: dict, action: str) -> None:
         meaningful = boredom >= 20 or happiness_before <= 80
         cat["happiness"] = min(100, happiness_before + 24)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + 5)
-        cat["boredom"] = max(0, boredom - 35)
+        cat["boredom"] = max(0, boredom - round(35 * novelty))
         cat["hunger"] = min(100, hunger_before + 7)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
     elif action == "walk":
         meaningful = boredom >= 25 or _walk_hours(cat, moment) >= 8
         cat["happiness"] = min(100, happiness_before + 20)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + 7)
-        cat["boredom"] = max(0, boredom - 22)
+        cat["boredom"] = max(0, boredom - round(22 * novelty))
         cat["hunger"] = min(100, hunger_before + 10)
         cat["rest_level"] = max(0, sleep_need_percent(cat) - 12)
     elif action == "talk":
         meaningful = boredom >= 15 or happiness_before <= 85 or trust <= 65
         cat["happiness"] = min(100, happiness_before + 7)
         cat["love_bar"] = min(100, int(cat["love_bar"]) + 3)
-        cat["boredom"] = max(0, boredom - 25)
+        cat["boredom"] = max(0, boredom - round(25 * novelty))
         cat["last_social_at"] = moment.isoformat()
     else:
         return
