@@ -152,6 +152,8 @@ async def _sweep(bot: Bot) -> None:
 
 def start_notification_sweep(bot: Bot) -> None:
    global _scheduler, _fallback_tasks
+   # Catch up immediately after a Railway restart if a sleep ended offline.
+   asyncio.create_task(_wake_sweep(bot))
    if AsyncIOScheduler is not None:
       _scheduler = AsyncIOScheduler()
       _scheduler.add_job(
