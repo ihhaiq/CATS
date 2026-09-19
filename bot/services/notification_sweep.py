@@ -18,6 +18,7 @@ from bot.services.local_store import (
    get_active_cats,
    is_sleeping,
    notification_gap_seconds,
+   sleep_ready_to_finish,
    update_cat,
    user_action_lock,
 )
@@ -94,10 +95,9 @@ async def _wake_sweep(bot: Bot) -> None:
    async with _sweep_lock:
       for snapshot in await get_active_cats():
          # The minute-level wake check should be almost free for awake cats.
-         sleep_until = snapshot.get("sleep_until")
-         expired = bool(sleep_until and not is_sleeping(snapshot))
+         ready_to_wake = sleep_ready_to_finish(snapshot)
          pending = bool(snapshot.get("wake_notice_pending"))
-         if not expired and not pending:
+         if not ready_to_wake and not pending:
             continue
 
          owner_id = int(snapshot["owner_id"])
