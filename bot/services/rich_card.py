@@ -66,8 +66,6 @@ async def build_rich_card(
         sleep_note = ""
     notice = cat.get("action_notice", "")
     notice_html = f"<p><b>{html.escape(str(notice))}</b></p>" if notice else ""
-    wake_action = "wake" if sleeping else "sleep"
-    wake_label = "إيقاظ" if sleeping else "نوم"
     hunger = int(cat.get("hunger", 20))
     happiness = int(cat.get("happiness", 100))
     love = int(cat.get("love_bar", 100))
@@ -127,15 +125,12 @@ async def build_rich_card(
     play_label = "⚡ لعب" if next_action == "play" else "لعب"
     walk_label = "⚡ نزهة" if next_action == "walk" else "نزهة"
     talk_label = "⚡ تحدث" if next_action == "talk" else "تحدث"
-    sleep_button_label = (
-        "⚡ نوم"
-        if not sleeping and next_action == "sleep"
-        else wake_label
-    )
+    sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
     if sleeping:
         action_buttons_html = f"""
 <tg-button-row align="center">
 <tg-button type="callback_data" style="primary" data="cat:wake">إيقاظ</tg-button>
+<tg-button type="callback_data" data="cat:status">تحديث</tg-button>
 </tg-button-row>
 """.strip()
     else:
@@ -148,6 +143,7 @@ async def build_rich_card(
 <tg-button-row align="center">
 <tg-button type="callback_data" data="cat:talk">{talk_label}</tg-button>
 <tg-button type="callback_data" data="cat:sleep">{sleep_button_label}</tg-button>
+<tg-button type="callback_data" data="cat:status">تحديث</tg-button>
 </tg-button-row>
 """.strip()
     hint_map = {
