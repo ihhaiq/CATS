@@ -87,6 +87,7 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
   cat = {
     "owner_id": user_id,
     "partner_id": None,
+    "adopted_at": stamp,
     "name": name,
     "title": "الأليف",
     "id_number": str(random.randint(100000, 999999)),
