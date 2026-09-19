@@ -317,7 +317,10 @@ async def handle_rich_action(query: CallbackQuery) -> None:
             )
 
     elif action == "wake":
+        rest_before_wake = sleep_need_percent(cat)
         wake_now(cat)
+        if rest_before_wake < 60:
+            cat["trust"] = max(0, int(cat.get("trust", 60)) - 2)
         cat["wake_attempts"] = 0
         media_kind = "status"
         points = 0
