@@ -159,6 +159,11 @@ async def handle_rich_action(query: CallbackQuery) -> None:
                 "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.",
                 show_alert=True,
             )
+        elif block_reason == "bored_of_play":
+            await query.answer(
+                "😾 ملت من نفس اللعب. حچي وياها أو طلّعها نزهة وغيّر الروتين.",
+                show_alert=True,
+            )
         else:
             await query.answer(
                 "🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.",
