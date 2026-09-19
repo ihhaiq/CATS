@@ -312,7 +312,7 @@ async def _handle_rich_action_locked(
         apply_care_effects(cat, "talk")
         cat["last_talk"] = datetime.utcnow().isoformat()
         points = 0
-        if random.random() < 0.15:
+        if cat.get("last_care_meaningful") and random.random() < 0.15:
             notice_token = _set_action_notice(
                 cat,
                 "😽 قربت منك وصارت تتمسح بيك من كثر ما ارتاحت للحچي.",
@@ -396,6 +396,15 @@ async def _handle_rich_action_locked(
         notice_token = _set_action_notice(
             cat,
             "⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل. الرعاية تنحسب، لكن بدون نقاط إضافية.",
+        )
+    elif (
+        action in {"feed", "play", "walk", "talk"}
+        and not cat.get("last_care_meaningful", False)
+        and not notice_token
+    ):
+        notice_token = _set_action_notice(
+            cat,
+            "😺 هذا تفاعل اختياري؛ ما كانت محتاجته هسه، لذلك بدون نقاط.",
         )
 
     balance = await get_user_points(user_id)
