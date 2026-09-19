@@ -1,7 +1,6 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
-import random
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -304,17 +303,33 @@ def sleep_ready_to_finish(
 
 
 def finish_sleep(cat: dict) -> bool:
-    """Finish a nap on time or a main sleep when fully rested/on time."""
+    """Finish naps on time; main sleep ends only when the cat is actually rested."""
     if not sleep_ready_to_finish(cat):
         return False
 
     now = datetime.utcnow()
-    if is_sleeping(cat):
-        _refresh_rest(cat, now)
-        # Main sleep can end early as soon as the rest meter is effectively full.
+    rest = _refresh_rest(cat, now)
+
+    if cat.get("sleep_kind") == "main":
+        if rest < 98:
+            # Hunger can become severe during a long sleep and slow recovery.
+            # Extend the session from the current state instead of waking a
+            # still-tired cat just because the original estimate expired.
+            recovery = REST_RECOVERY_PER_SLEEP_HOUR
+            if int(cat.get("hunger", 20)) >= 85:
+                recovery *= 0.8
+            extra_hours = max(0.25, (98 - rest) / recovery)
+            cat["sleep_until"] = (
+                now + timedelta(hours=extra_hours)
+            ).isoformat()
+            cat["sleep_planned_hours"] = (
+                float(cat.get("sleep_planned_hours", 0.0)) + extra_hours
+            )
+            cat["rest_updated_at"] = now.isoformat()
+            return False
+
+        # Main sleep may finish before the original estimate once rest is full.
         cat["sleep_until"] = now.isoformat()
-    else:
-        _refresh_rest(cat, now)
 
     _commit_sleep_today(cat, now)
 
