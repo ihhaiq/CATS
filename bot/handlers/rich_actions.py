@@ -28,6 +28,7 @@ from bot.services.local_store import (
     sleep_need_percent,
     start_sleep,
     update_cat,
+    user_action_lock,
     wake_now,
 )
 from bot.services.rich_card import build_rich_card
@@ -118,8 +119,16 @@ def _schedule_notice_clear(
 
 @router.callback_query(lambda query: query.data and query.data.startswith("cat:"))
 async def handle_rich_action(query: CallbackQuery) -> None:
-    action = query.data.split(":", 1)[1]
     user_id = query.from_user.id
+    async with user_action_lock(user_id):
+        await _handle_rich_action_locked(query, user_id)
+
+
+async def _handle_rich_action_locked(
+    query: CallbackQuery,
+    user_id: int,
+) -> None:
+    action = query.data.split(":", 1)[1]
     await ensure_user(user_id)
     cat = await get_user_cat(user_id)
     if cat is None:
