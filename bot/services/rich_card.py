@@ -8,6 +8,7 @@ from aiogram.types import (
 )
 
 from bot.services.local_store import (
+    can_bypass_action_cooldown,
     collect_needs,
     fullness_percent,
     is_sleeping,
@@ -149,10 +150,26 @@ async def build_rich_card(
         if next_action
         else ""
     )
-    feed_label = "⚡ إطعام" if next_action == "feed" else "إطعام"
-    play_label = "⚡ لعب" if next_action == "play" else "لعب"
-    walk_label = "⚡ نزهة" if next_action == "walk" else "نزهة"
-    talk_label = "⚡ تحدث" if next_action == "talk" else "تحدث"
+    feed_label = (
+        "⚡ إطعام"
+        if can_bypass_action_cooldown(cat, "feed")
+        else "إطعام"
+    )
+    play_label = (
+        "⚡ لعب"
+        if can_bypass_action_cooldown(cat, "play")
+        else "لعب"
+    )
+    walk_label = (
+        "⚡ نزهة"
+        if can_bypass_action_cooldown(cat, "walk")
+        else "نزهة"
+    )
+    talk_label = (
+        "⚡ تحدث"
+        if can_bypass_action_cooldown(cat, "talk")
+        else "تحدث"
+    )
     sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
     if sleeping:
         action_buttons_html = f"""
@@ -193,15 +210,32 @@ async def build_rich_card(
         "sleepy": "🥱 بدت تنعس.",
         "peckish": "🥣 بدت تجوع شوي.",
     }
-    priority = [
+    need_priority_by_action = {
+        "feed": ["starving", "hungry", "peckish"],
+        "sleep": ["exhausted", "tired", "sleepy"],
+        "talk": [
+            "love_critical",
+            "trust_critical",
+            "very_sad",
+            "very_bored",
+            "love_low",
+            "trust_low",
+            "sad",
+            "bored",
+            "attention_due",
+        ],
+        "walk": ["walk_due"],
+        "play": ["very_bored", "bored", "restless"],
+    }
+    fallback_priority = [
         "starving",
+        "hungry",
         "exhausted",
+        "tired",
         "love_critical",
         "trust_critical",
         "very_sad",
         "very_bored",
-        "hungry",
-        "tired",
         "love_low",
         "trust_low",
         "sad",
@@ -212,7 +246,16 @@ async def build_rich_card(
         "restless",
         "peckish",
     ]
-    primary_need = next((item for item in priority if item in needs), None)
+    preferred = need_priority_by_action.get(next_action, [])
+    primary_need = next(
+        (item for item in preferred if item in needs),
+        None,
+    )
+    if primary_need is None:
+        primary_need = next(
+            (item for item in fallback_priority if item in needs),
+            None,
+        )
     state_hint = (
         hint_map.get(primary_need, "")
         if primary_need
