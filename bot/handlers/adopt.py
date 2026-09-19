@@ -69,6 +69,13 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "hunger": 20,
     "happiness": 100,
     "love_bar": 100,
+    "trust": 60,
+    "boredom": 10,
+    "last_care_action": None,
+    "last_care_at": None,
+    "last_social_at": stamp,
+    "last_talk": None,
+    "same_action_streak": 0,
     "partner_affinity": 0,
     "is_fled": False,
     "last_fed": stamp,
@@ -76,9 +83,11 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "last_walk": stamp,
     "last_decay_at": stamp,
     "sleep_day": datetime.utcnow().date().isoformat(),
-    "slept_today_hours": 10.0,
+    "slept_today_hours": 0.0,
     "sleep_until": None,
     "last_wake_at": stamp,
+    "rest_level": 100,
+    "rest_updated_at": stamp,
   }
   await create_cat(cat)
   return cat
@@ -113,7 +122,9 @@ async def cb_guide_open(query: CallbackQuery) -> None:
       "• 🐾 تبنّى قطة واختار إلها اسم.\n"
       "• 🍖 حافظ على الشبع بالإطعام.\n"
       "• 🎾 اللعب والنزهة يرفعون السعادة.\n"
-      "• 😴 راقب عداد الراحة وخلي القطة تنام بوقتها.\n"
+      "• 😴 عداد الراحة ينزل بسرعة ويرتفع ببطء، يعني القطة تحتاج نوم فعلي وكافي.\n"
+      "• 🌀 اللعب والحديث يقللون الملل، والروتين والنوم الكثير يزيدوه.\n"
+      "• 🤝 الثقة تزيد بالرعاية الثابتة وتنزل بالإهمال الشديد.\n"
       "• ❤️ الإهمال يأثر على الحب وحالة القطة.\n"
       "• 🐾 بعض الأفعال تكافئك بعملة قططية تقدر تستخدمها داخل البوت.\n\n"
       "تگدر ترجع للواجهة وتبدأ من زر <b>تبنّي قطة</b>."

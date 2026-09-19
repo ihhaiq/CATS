@@ -16,7 +16,7 @@ import random
 
 from bot.config import settings
 from bot.services.economy import check_cooldown
-from bot.services.local_store import apply_decay, award_points, get_user_cat, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
+from bot.services.local_store import apply_care_effects, apply_decay, award_points, get_user_cat, ensure_user, parse_time, update_cat, is_sleeping, sleep_need_percent
 
 router = Router(name="care")
 
@@ -50,16 +50,24 @@ async def _care(message: Message, action: str) -> None:
     await update_cat(cat)
     await message.answer("😾 القطة تحتاج النوم الآن وترفض هذا الفعل.")
     return
-  if refusal_until and datetime.utcnow().timestamp() < refusal_until:
+  if (
+    refusal_until
+    and datetime.utcnow().timestamp() < refusal_until
+    and action in {"play", "walk"}
+  ):
     await update_cat(cat)
-    await message.answer("😾 القطة ستقبل بعد دقائق قليلة.")
+    await message.answer("😾 القطة مرهقة، خليها ترتاح شوي قبل اللعب أو النزهة.")
     return
   if refusal_until:
     cat.pop("action_refusal_until", None)
-  elif sleep_need_percent(cat) <= 65:
+  elif sleep_need_percent(cat) <= 20 and action in {"play", "walk"}:
     cat["action_refusal_until"] = datetime.utcnow().timestamp() + random.randint(120, 300)
     await update_cat(cat)
-    await message.answer("😾 القطة تريد النوم الآن، جرّب بعد دقائق.")
+    await message.answer("😾 القطة مرهقة جداً وتحتاج تنام قبل اللعب أو النزهة.")
+    return
+  if action == "feed" and int(cat.get("hunger", 20)) <= 15:
+    await update_cat(cat)
+    await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
     return
   timestamp_key = {"feed": "last_fed", "play": "last_played", "walk": "last_walk"}[action]
   cooldown = {"feed": settings.feed_cooldown, "play": settings.play_cooldown, "walk": settings.walk_cooldown}[action]
@@ -69,18 +77,15 @@ async def _care(message: Message, action: str) -> None:
     await update_cat(cat)
     return
 
+  apply_care_effects(cat, action)
   if action == "feed":
-    cat["hunger"] = max(0, cat["hunger"] - 30)
-    text = "🍖 شبعت القطة"
+    text = "🍖 شبعت القطة وصارت أهدأ وأسعد"
     points = 5
   elif action == "play":
-    cat["happiness"] = min(100, cat["happiness"] + 25)
-    cat["hunger"] = min(100, cat["hunger"] + 5)
     text = "🎾 انبسطت القطة باللعب"
     points = 5
   else:
-    cat["happiness"] = min(100, cat["happiness"] + 15)
-    text = "🚶 طلعت القطة نزهة"
+    text = "🚶 طلعت القطة نزهة وانبسطت"
     points = 10
   cat[timestamp_key] = datetime.utcnow().isoformat()
   await update_cat(cat)

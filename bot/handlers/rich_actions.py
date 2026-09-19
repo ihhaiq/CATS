@@ -12,6 +12,7 @@ from aiogram.types import CallbackQuery
 from bot.config import settings
 from bot.services.economy import check_cooldown
 from bot.services.local_store import (
+    apply_care_effects,
     apply_decay,
     award_points,
     clear_action_notice,
@@ -124,8 +125,8 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
     # Any new action invalidates an older temporary notice/task.
     clear_action_notice(cat)
-    woke = finish_sleep(cat)
     apply_decay(cat)
+    woke = finish_sleep(cat)
     if woke:
         await update_cat(cat)
 
@@ -143,47 +144,42 @@ async def handle_rich_action(query: CallbackQuery) -> None:
         await query.answer()
         return
 
-    if action == "wake" and cat.get("wake_attempts", 0) == 0:
-        notice_token = _set_action_notice(cat, "😾 القطة ترفض النهوض!")
-        cat["wake_attempts"] = 1
-        await update_cat(cat)
-        await _edit_card(
-            query,
-            await _build_card(query, 
-                cat,
-                await get_user_points(user_id),
-                "cat_angry_sleep",
-            ),
+    if action == "wake" and is_sleeping(cat):
+        rest_now = sleep_need_percent(cat)
+        attempts = int(cat.get("wake_attempts", 0))
+        should_refuse = (
+            (rest_now < 30 and attempts == 0)
+            or (30 <= rest_now < 50 and random.random() < 0.20)
         )
-        await query.answer()
-        _schedule_notice_clear(query, user_id, notice_token)
-        return
-
-    if action == "wake" and random.random() < 0.35:
-        notice_token = _set_action_notice(cat, "😾 القطة ترفض النهوض!")
-        cat["wake_attempts"] = cat.get("wake_attempts", 0) + 1
-        await update_cat(cat)
-        await _edit_card(
-            query,
-            await _build_card(query, 
+        if should_refuse:
+            notice_token = _set_action_notice(
                 cat,
-                await get_user_points(user_id),
-                "cat_angry_sleep",
-            ),
-        )
-        await query.answer()
-        _schedule_notice_clear(query, user_id, notice_token)
-        return
+                "😾 بعدني تعبانة، خليني أنام شوي بعد!",
+            )
+            cat["wake_attempts"] = attempts + 1
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "cat_angry_sleep",
+                ),
+            )
+            await query.answer()
+            _schedule_notice_clear(query, user_id, notice_token)
+            return
 
     refusal_until = cat.get("action_refusal_until")
     if (
         refusal_until
         and datetime.utcnow().timestamp() < refusal_until
-        and action in {"feed", "play", "walk", "talk"}
+        and action in {"play", "walk"}
     ):
         notice_token = _set_action_notice(
             cat,
-            "😾 القطة ستقبل بعد دقائق قليلة!",
+            "😾 القطة مرهقة، خليها ترتاح شوي قبل اللعب أو النزهة.",
         )
         await update_cat(cat)
         await _edit_card(
@@ -201,8 +197,8 @@ async def handle_rich_action(query: CallbackQuery) -> None:
     if refusal_until:
         cat.pop("action_refusal_until", None)
     elif (
-        sleep_need_percent(cat) <= 65
-        and action in {"feed", "play", "walk", "talk"}
+        sleep_need_percent(cat) <= 20
+        and action in {"play", "walk"}
     ):
         notice_token = _set_action_notice(
             cat,
@@ -228,6 +224,12 @@ async def handle_rich_action(query: CallbackQuery) -> None:
     notice_token: str | None = None
 
     if action == "feed":
+        if int(cat.get("hunger", 20)) <= 15:
+            await query.answer(
+                "😺 القطة شبعانة هسه وما تحتاج أكل زيادة.",
+                show_alert=True,
+            )
+            return
         ready, left = check_cooldown(
             parse_time(cat["last_fed"]),
             settings.feed_cooldown,
@@ -238,76 +240,62 @@ async def handle_rich_action(query: CallbackQuery) -> None:
                 show_alert=True,
             )
             return
-        cat["hunger"] = max(0, cat["hunger"] - 30)
+        apply_care_effects(cat, "feed")
         cat["last_fed"] = datetime.utcnow().isoformat()
         points = random.choice([0, 0, 2, 5, 8])
 
-    elif action in {"play", "walk"} and random.random() < 0.2:
-        media_kind = "cat_angry_sleep"
-        points = 0
-        notice_token = _set_action_notice(cat, "😾 القطة تريد النوم!")
-        cat["action_refusal_until"] = (
-            datetime.utcnow().timestamp() + random.randint(120, 300)
-        )
-
     elif action == "play":
-        cat["happiness"] = min(100, cat["happiness"] + 25)
-        cat["hunger"] = min(100, cat["hunger"] + 5)
+        apply_care_effects(cat, "play")
         cat["last_played"] = datetime.utcnow().isoformat()
         points = random.choice([0, 1, 3, 5, 10])
         if random.random() < 0.15:
             notice_token = _set_action_notice(
                 cat,
-                "🥰 نامت القطة على صدرك!",
+                "😻 اندمجت باللعب وياك وصارت تركض حولك!",
             )
 
     elif action == "walk":
-        cat["happiness"] = min(100, cat["happiness"] + 15)
+        apply_care_effects(cat, "walk")
         cat["last_walk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 2, 5, 10, 15])
 
     elif action == "talk":
-        cat["happiness"] = min(100, cat["happiness"] + 5)
+        last_talk = cat.get("last_talk")
+        if last_talk:
+            ready, left = check_cooldown(
+                parse_time(last_talk),
+                settings.talk_cooldown,
+            )
+            if not ready:
+                await query.answer(
+                    f"خليها تستوعب الحچي شوي 😺 ارجع بعد {max(1, left // 60)} دقيقة.",
+                    show_alert=True,
+                )
+                return
+        apply_care_effects(cat, "talk")
+        cat["last_talk"] = datetime.utcnow().isoformat()
         points = random.choice([0, 1, 2, 4])
         if random.random() < 0.15:
             notice_token = _set_action_notice(
                 cat,
-                "🥰 نامت القطة على صدرك!",
+                "😽 قربت منك وصارت تتمسح بيك من كثر ما ارتاحت للحچي.",
             )
 
     elif action == "sleep":
-        if cat["hunger"] > 70 or cat["happiness"] < 30:
+        rest_now = sleep_need_percent(cat)
+        if rest_now >= 98:
             notice_token = _set_action_notice(
                 cat,
-                "😾 القطة لا تستطيع النوم الآن، إنها تحتاج رعاية!",
+                "😺 مرتاحة تقريباً بالكامل وما تحتاج تنام هسه.",
             )
-            media_kind = "cat_angry_sleep"
             await update_cat(cat)
             await _edit_card(
                 query,
-                await _build_card(query, 
+                await _build_card(
+                    query,
                     cat,
                     await get_user_points(user_id),
-                    media_kind,
-                ),
-            )
-            await query.answer()
-            _schedule_notice_clear(query, user_id, notice_token)
-            return
-
-        if random.random() < 0.25:
-            notice_token = _set_action_notice(
-                cat,
-                "😾 القطة رفضت النوم!",
-            )
-            media_kind = "cat_angry_sleep"
-            await update_cat(cat)
-            await _edit_card(
-                query,
-                await _build_card(query, 
-                    cat,
-                    await get_user_points(user_id),
-                    media_kind,
+                    "status",
                 ),
             )
             await query.answer()
@@ -316,16 +304,35 @@ async def handle_rich_action(query: CallbackQuery) -> None:
 
         start_sleep(cat)
         cat["wake_attempts"] = 0
-        points = random.choice([0, 1, 2])
+        points = 0
         media_kind = "sleep"
-        if random.random() < 0.15:
+        if rest_now <= 25:
             notice_token = _set_action_notice(
                 cat,
-                "🥰 نامت القطة على صدرك!",
+                "😴 نامت بسرعة لأنها كانت منهكة.",
+            )
+        elif random.random() < 0.15:
+            notice_token = _set_action_notice(
+                cat,
+                "💤 لفت نفسها ونامت بهدوء.",
             )
 
     elif action == "wake":
-        wake_now(cat)
+        rest_before_wake = sleep_need_percent(cat)
+        did_wake = wake_now(cat)
+        if did_wake:
+            trust_loss = 0
+            if rest_before_wake < 30:
+                trust_loss = 3
+            elif rest_before_wake < 50:
+                trust_loss = 2
+            elif rest_before_wake < 70:
+                trust_loss = 1
+            if trust_loss:
+                cat["trust"] = max(
+                    0,
+                    int(cat.get("trust", 60)) - trust_loss,
+                )
         cat["wake_attempts"] = 0
         media_kind = "status"
         points = 0

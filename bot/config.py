@@ -31,6 +31,7 @@ class Settings:
     feed_cooldown: int = 15 * 60
     play_cooldown: int = 15 * 60
     walk_cooldown: int = 4 * 60 * 60
+    talk_cooldown: int = 10 * 60
 
     # Rest/sleep: while awake the visible rest meter drops in discrete steps.
     sleep_decay_interval_minutes: int = max(1, int(os.getenv("SLEEP_DECAY_INTERVAL_MINUTES", "5")))

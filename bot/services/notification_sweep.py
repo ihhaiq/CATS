@@ -1,28 +1,4 @@
-"""
-Periodic background sweep: for every active (non-FLED) cat, apply lazy decay,
-check alert thresholds, and send a notification (with a fresh state image) if
-a threshold was just crossed and hasn't already been notified within the
-configured gap.
-TODO (AGENT.md step 11) — this is the piece that ties everything else together:
-  1. Loop all non-FLED cats in DB (paginate if the bot grows large).
-  2. For each: decay_engine.apply_lazy_decay(cat).
-  3. Determine current_state:
-       "hungry"  if cat.hunger > settings.hunger_alert_threshold
-       "sad"     if cat.happiness < settings.happiness_alert_threshold
-       "love_low" if cat.love_bar is close to 0 (e.g. <= 15) and not yet fled
-       else None
-  4. If current_state and (current_state != cat.last_notified_state or
-     enough time passed since last_notified_at per settings.notification_min_gap):
-       - render image_renderer.render_cat(cat) for this exact state
-       - send to cat.owner_id (and partner_id if set) via bot.send_photo
-       - update cat.last_notified_state / last_notified_at
-  5. If current_state is None, clear last_notified_state so a future re-trigger
-     of the same condition notifies again.
-  6. Also call flee_logic.check_flee(cat) here — if it just flipped to fled,
-     send the "ran away" notification instead of a normal alert, skip steps 3-5.
-  7. Run this on an interval (e.g. every 15-30 min) via APScheduler
-     AsyncIOScheduler, started from main.py's on_startup.
-"""
+"""Periodic coupled-needs notification sweep."""
 import asyncio
 import logging
 from datetime import datetime
@@ -37,9 +13,11 @@ except ModuleNotFoundError:
 from bot.config import settings
 from bot.services.local_store import (
    apply_decay,
+   collect_needs,
    finish_sleep,
    get_active_cats,
    is_sleeping,
+   notification_gap_seconds,
    update_cat,
 )
 
@@ -47,32 +25,65 @@ _scheduler: Any = None
 _fallback_task: asyncio.Task | None = None
 logger = logging.getLogger("catibot.notification_sweep")
 
+_NEED_MESSAGES = {
+   "love_critical": "💔 حبها ورابطتها وياك صارت بحالة حرجة وتحتاج اهتمام حقيقي.",
+   "love_low": "🥺 حست بالإهمال وحبها إلك بدأ ينزل.",
+   "trust_critical": "🧊 ثقتها بيك صارت ضعيفة جداً؛ تحتاج رعاية ثابتة وبدون إزعاج.",
+   "trust_low": "🤝 ثقتها بيك نازلة وتحتاج تعامل ثابت وهادئ.",
+   "starving": "🚨🍖 جوعها صار شديد جداً، أطعمها بأقرب وقت.",
+   "hungry": "🍗 قطتك جائعة وتدور على أكل.",
+   "peckish": "🥣 بدت تجوع شوي، قريب راح تحتاج أكل.",
+   "exhausted": "🪫 قطتك منهكة جداً وتحتاج نوم طويل.",
+   "tired": "😴 تعبت وتحتاج ترتاح وتنام.",
+   "sleepy": "🥱 بدت تنعس؛ طاقتها قاعدة تنزل.",
+   "walk_due": "🌿 ضاقت من القعدة وتحتاج نزهة وتغيير جو.",
+   "attention_due": "💭 قطتك مشتاقتلك وتريد تحچي أو تلعب وياك.",
+   "very_bored": "🙀 الملل عندها صار شديد؛ تريد لعب أو حديث وتغيير بالروتين.",
+   "bored": "🌀 قطتك حست بالملل وتريد تسوي شي وياك.",
+   "restless": "😼 بدت تمل وتدور شي يشغلها.",
+   "very_sad": "💔😿 حزينة جداً وحالتها النفسية نازلة.",
+   "sad": "😿 مزاجها مو زين وتحتاج اهتمام.",
+}
+
 
 async def _sweep(bot: Bot) -> None:
    for cat in await get_active_cats():
+      # Decay first while sleep interval metadata still exists, then finalize wake.
+      apply_decay(cat)
       woke = finish_sleep(cat)
       if woke:
-         apply_decay(cat)
          cat["last_notified_state"] = None
+         cat["last_notified_at"] = None
+
       if is_sleeping(cat):
          await update_cat(cat)
          continue
-      apply_decay(cat)
-      state = None
-      if cat["hunger"] >= settings.hunger_alert_threshold:
-         state = "hungry"
-      elif cat["happiness"] <= settings.happiness_alert_threshold:
-         state = "sad"
-      elif cat["love_bar"] <= 15:
-         state = "love_low"
+
+      needs = collect_needs(cat)
+      state = "|".join(needs) if needs else None
       last_at = cat.get("last_notified_at")
-      enough_gap = not last_at or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds() >= settings.notification_min_gap
+      gap = notification_gap_seconds(needs)
+      enough_gap = (
+         not last_at
+         or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds()
+         >= gap
+      )
+
       if state and (state != cat.get("last_notified_state") or enough_gap):
-         message = {
-            "hungry": "🍖 قطتك جائعة وتحتاج إطعاماً.",
-            "sad": "💔 قطتك حزينة وتحتاج اهتماماً.",
-            "love_low": "🥺 قطتك تحتاج حباً ورعاية.",
-         }[state]
+         details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in needs)
+         urgent = any(
+            item in {
+               "love_critical",
+               "trust_critical",
+               "starving",
+               "exhausted",
+               "very_bored",
+               "very_sad",
+            }
+            for item in needs
+         )
+         header = "🚨 قطتك تحتاجك هسه:" if urgent else "🐾 تحديث حالة قطتك:"
+         message = f"{header}\n{details}"
          for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
             try:
                await bot.send_message(user_id, message)
@@ -82,6 +93,8 @@ async def _sweep(bot: Bot) -> None:
          cat["last_notified_at"] = datetime.utcnow().isoformat()
       elif state is None:
          cat["last_notified_state"] = None
+         cat["last_notified_at"] = None
+
       await update_cat(cat)
 
 
@@ -89,7 +102,12 @@ def start_notification_sweep(bot: Bot) -> None:
    global _scheduler, _fallback_task
    if AsyncIOScheduler is not None:
       _scheduler = AsyncIOScheduler()
-      _scheduler.add_job(_sweep, "interval", minutes=settings.notification_interval_minutes, args=[bot])
+      _scheduler.add_job(
+         _sweep,
+         "interval",
+         minutes=settings.notification_interval_minutes,
+         args=[bot],
+      )
       _scheduler.start()
       return
 
