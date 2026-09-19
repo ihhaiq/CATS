@@ -360,6 +360,16 @@ def _routine_streak(cat: dict, action: str, moment: datetime) -> int:
     return 1
 
 
+def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
+    previous_at = cat.get("last_care_at")
+    if cat.get("last_care_action") != action or not previous_at:
+        return False
+    recent = (
+        moment - parse_time(previous_at)
+    ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
+    return recent and int(cat.get("same_action_streak", 0)) >= 5
+
+
 def apply_care_effects(cat: dict, action: str) -> None:
     """Apply care; useful variety builds trust, mindless repetition does not."""
     moment = datetime.utcnow()
@@ -456,7 +466,10 @@ def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
     if action == "feed":
         return int(cat.get("hunger", 20)) >= settings.hunger_alert_threshold
     if action == "play":
-        return int(cat.get("boredom", 10)) >= 35
+        return (
+            int(cat.get("boredom", 10)) >= 35
+            and not _action_overused(cat, "play", moment)
+        )
     if action == "walk":
         return _walk_hours(cat, moment) >= WALK_DUE_HOURS
     if action == "talk":
@@ -474,6 +487,8 @@ def action_block_reason(cat: dict, action: str) -> str | None:
             return "starving"
         if sleep_need_percent(cat) <= 30:
             return "tired"
+    if action == "play" and _action_overused(cat, "play", datetime.utcnow()):
+        return "bored_of_play"
     return None
 
 
@@ -495,6 +510,8 @@ def recommended_action(cat: dict) -> str | None:
     if _walk_hours(cat, moment) >= WALK_DUE_HOURS:
         return "walk"
     if int(cat.get("boredom", 10)) >= 35:
+        if _action_overused(cat, "play", moment):
+            return "talk"
         return "play"
     if _attention_due(cat, moment):
         return "talk"
