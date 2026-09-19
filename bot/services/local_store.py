@@ -437,9 +437,70 @@ def apply_care_effects(cat: dict, action: str) -> None:
         )
 
 
-def can_bypass_feed_cooldown(cat: dict) -> bool:
-    """A genuinely hungry cat can always be fed, regardless of cooldown."""
-    return int(cat.get("hunger", 20)) >= settings.hunger_alert_threshold
+def _attention_due(cat: dict, moment: datetime) -> bool:
+    """Whether the cat currently needs a real social interaction."""
+    social_hours = _social_hours(cat, moment)
+    if social_hours < 10:
+        return False
+    return (
+        int(cat.get("boredom", 10)) >= 25
+        or int(cat.get("happiness", 100)) <= 50
+        or int(cat.get("trust", 60)) <= 35
+        or int(cat.get("love_bar", 100)) <= 30
+    )
+
+
+def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
+    """Needs override cooldowns; optional interactions still respect them."""
+    moment = datetime.utcnow()
+    if action == "feed":
+        return int(cat.get("hunger", 20)) >= settings.hunger_alert_threshold
+    if action == "play":
+        return int(cat.get("boredom", 10)) >= 35
+    if action == "walk":
+        return _walk_hours(cat, moment) >= WALK_DUE_HOURS
+    if action == "talk":
+        return _attention_due(cat, moment)
+    return False
+
+
+def action_block_reason(cat: dict, action: str) -> str | None:
+    """Return a higher-priority need that makes an action illogical."""
+    hunger = int(cat.get("hunger", 20))
+    if action == "feed" and hunger <= 15:
+        return "full"
+    if action in {"play", "walk"}:
+        if hunger >= 90:
+            return "starving"
+        if sleep_need_percent(cat) <= 30:
+            return "tired"
+    return None
+
+
+def recommended_action(cat: dict) -> str | None:
+    """Choose one useful next action for the current state."""
+    if is_sleeping(cat):
+        return None
+
+    hunger = int(cat.get("hunger", 20))
+    rest = sleep_need_percent(cat)
+    moment = datetime.utcnow()
+
+    if hunger >= 90:
+        return "feed"
+    if rest <= 30:
+        return "sleep"
+    if hunger >= settings.hunger_alert_threshold:
+        return "feed"
+    if _walk_hours(cat, moment) >= WALK_DUE_HOURS:
+        return "walk"
+    if int(cat.get("boredom", 10)) >= 35:
+        return "play"
+    if _attention_due(cat, moment):
+        return "talk"
+    if rest <= 50:
+        return "sleep"
+    return None
 
 
 def collect_needs(cat: dict) -> list[str]:
@@ -479,11 +540,10 @@ def collect_needs(cat: dict) -> list[str]:
 
     moment = datetime.utcnow()
     walk_hours = _walk_hours(cat, moment)
-    if walk_hours >= WALK_DUE_HOURS and happiness <= 80:
+    if walk_hours >= WALK_DUE_HOURS:
         needs.append("walk_due")
 
-    social_hours = _social_hours(cat, moment)
-    if social_hours >= 10 and 25 <= boredom < 35:
+    if _attention_due(cat, moment):
         needs.append("attention_due")
 
     if boredom >= 85:
