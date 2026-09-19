@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from bot.services.local_store import (
     apply_care_effects,
     apply_decay,
+    can_bypass_feed_cooldown,
     collect_needs,
     notification_gap_seconds,
     sleep_need_percent,
@@ -164,6 +165,15 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["slept_today_hours"] = 8.0
         apply_decay(cat)
         self.assertGreater(cat["boredom"], 20)
+
+    def test_hungry_cat_bypasses_feed_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 69
+        self.assertFalse(can_bypass_feed_cooldown(cat))
+        cat["hunger"] = 70
+        self.assertTrue(can_bypass_feed_cooldown(cat))
+        apply_care_effects(cat, "feed")
+        self.assertFalse(can_bypass_feed_cooldown(cat))
 
     def test_alerts_have_progressive_severity(self) -> None:
         cat = old_cat(0)
