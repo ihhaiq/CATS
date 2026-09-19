@@ -256,6 +256,8 @@ async def guest_message(message: Message) -> None:
                 "sleep_day": datetime.utcnow().date().isoformat(),
                 "slept_today_hours": 0.0,
                 "sleep_until": None,
+                "sleep_kind": None,
+                "sleep_planned_hours": 0.0,
                 "last_wake_at": stamp,
                 "rest_level": 100,
                 "rest_updated_at": stamp,
