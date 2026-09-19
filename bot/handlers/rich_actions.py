@@ -18,6 +18,7 @@ from bot.services.local_store import (
     clear_action_notice,
     action_block_reason,
     can_bypass_action_cooldown,
+    care_reward_points,
     ensure_user,
     finish_sleep,
     get_user_cat,
@@ -26,6 +27,7 @@ from bot.services.local_store import (
     parse_time,
     sleep_duration_text,
     sleep_need_percent,
+    sleep_remaining_minutes,
     start_sleep,
     update_cat,
     user_action_lock,
@@ -151,9 +153,27 @@ async def _handle_rich_action_locked(
         await query.answer()
         return
 
+    if action == "wake" and not is_sleeping(cat):
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(query, cat, await get_user_points(user_id), "status"),
+        )
+        message = (
+            "😺 صحت من نفسها بالفعل."
+            if woke
+            else "😺 القطة صاحية أصلًا."
+        )
+        await query.answer(message, show_alert=True)
+        return
+
     if is_sleeping(cat) and action != "wake":
         await update_cat(cat)
-        await query.answer()
+        remaining = sleep_duration_text(sleep_remaining_minutes(cat))
+        await query.answer(
+            f"😴 القطة نائمة هسه. باقي تقريباً {remaining}.",
+            show_alert=True,
+        )
         return
 
     block_reason = action_block_reason(cat, action)
@@ -186,10 +206,14 @@ async def _handle_rich_action_locked(
     bypassed_cooldown = False
 
     if action == "feed":
-        ready, left = check_cooldown(
-            parse_time(cat["last_fed"]),
-            settings.feed_cooldown,
-        )
+        last_fed = cat.get("last_fed")
+        if last_fed:
+            ready, left = check_cooldown(
+                parse_time(last_fed),
+                settings.feed_cooldown,
+            )
+        else:
+            ready, left = True, 0
         need_bypass = can_bypass_action_cooldown(cat, "feed")
         bypassed_cooldown = not ready and need_bypass
         if not ready and not need_bypass:
@@ -200,13 +224,17 @@ async def _handle_rich_action_locked(
             return
         apply_care_effects(cat, "feed")
         cat["last_fed"] = datetime.utcnow().isoformat()
-        points = random.choice([0, 0, 2, 5, 8])
+        points = 0
 
     elif action == "play":
-        ready, left = check_cooldown(
-            parse_time(cat["last_played"]),
-            settings.play_cooldown,
-        )
+        last_played = cat.get("last_played")
+        if last_played:
+            ready, left = check_cooldown(
+                parse_time(last_played),
+                settings.play_cooldown,
+            )
+        else:
+            ready, left = True, 0
         need_bypass = can_bypass_action_cooldown(cat, "play")
         bypassed_cooldown = not ready and need_bypass
         if not ready and not need_bypass:
@@ -225,7 +253,7 @@ async def _handle_rich_action_locked(
                 "😾 ملت من نفس اللعب، جرّب تحچي وياها أو تطلعها نزهة.",
             )
         else:
-            points = random.choice([0, 1, 3, 5, 10])
+            points = 0
             if random.random() < 0.15:
                 notice_token = _set_action_notice(
                     cat,
@@ -233,10 +261,14 @@ async def _handle_rich_action_locked(
                 )
 
     elif action == "walk":
-        ready, left = check_cooldown(
-            parse_time(cat["last_walk"]),
-            settings.walk_cooldown,
-        )
+        last_walk = cat.get("last_walk")
+        if last_walk:
+            ready, left = check_cooldown(
+                parse_time(last_walk),
+                settings.walk_cooldown,
+            )
+        else:
+            ready, left = True, 0
         need_bypass = can_bypass_action_cooldown(cat, "walk")
         bypassed_cooldown = not ready and need_bypass
         if not ready and not need_bypass:
@@ -247,7 +279,7 @@ async def _handle_rich_action_locked(
             return
         apply_care_effects(cat, "walk")
         cat["last_walk"] = datetime.utcnow().isoformat()
-        points = random.choice([0, 2, 5, 10, 15])
+        points = 0
 
     elif action == "talk":
         last_talk = cat.get("last_talk")
@@ -268,7 +300,7 @@ async def _handle_rich_action_locked(
             return
         apply_care_effects(cat, "talk")
         cat["last_talk"] = datetime.utcnow().isoformat()
-        points = random.choice([0, 1, 2, 4])
+        points = 0
         if random.random() < 0.15:
             notice_token = _set_action_notice(
                 cat,
@@ -327,17 +359,23 @@ async def _handle_rich_action_locked(
                     0,
                     int(cat.get("trust", 60)) - trust_loss,
                 )
-        cat["wake_attempts"] = 0
         media_kind = "status"
         points = 0
 
     else:
         return
 
+    if action in {"feed", "play", "walk", "talk"}:
+        points = care_reward_points(
+            cat,
+            action,
+            bypassed_cooldown=bypassed_cooldown,
+        )
+
     if bypassed_cooldown and not notice_token:
         notice_token = _set_action_notice(
             cat,
-            "⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل.",
+            "⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل. الرعاية تنحسب، لكن بدون نقاط إضافية.",
         )
 
     balance = await get_user_points(user_id)
