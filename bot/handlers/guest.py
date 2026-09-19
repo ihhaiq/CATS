@@ -34,7 +34,7 @@ from bot.services.local_store import (
     user_action_lock,
     wake_now,
 )
-from bot.services.rich_card import build_rich_card
+from bot.services.rich_card import build_fled_card, build_rich_card
 from bot.services.shop import open_shop
 from bot.services.shop_card import build_shop_card
 
@@ -278,8 +278,8 @@ async def _guest_message_locked(message: Message) -> None:
             }
             await create_cat(cat)
             text = (
-                f"🐾 تم تبني {cat['name']} من Guest Mode!\n"
-                f"السلالة: {cat['breed']} | الرقم: #{cat['id_number']}\n"
+                f"🐾 تم تبني {html.escape(str(cat['name']))} من Guest Mode!\n"
+                f"السلالة: {html.escape(str(cat['breed']))} | الرقم: #{html.escape(str(cat['id_number']))}\n"
                 "استخدم @RichsCatBot حالة لمشاهدة الحالة."
             )
             title = "تم التبني"
@@ -294,6 +294,17 @@ async def _guest_message_locked(message: Message) -> None:
             apply_decay(cat)
             woke = finish_sleep(cat)
             await update_cat(cat)
+            if cat.get("is_fled"):
+                result = InlineQueryResultArticle(
+                    id="guest-fled",
+                    title="💨 هربت قطتك",
+                    description="وصل الحب إلى 0 بسبب الإهمال.",
+                    input_message_content=InputRichMessageContent(
+                        rich_message=build_fled_card(cat),
+                    ),
+                )
+                await message.bot.answer_guest_query(message.guest_query_id, result)
+                return
             if action == "status":
                 result = InlineQueryResultArticle(
                     id="guest-status",
