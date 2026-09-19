@@ -105,7 +105,7 @@ async def _clear_notice_later(
                     query,
                     cat,
                     await get_user_points(user_id),
-                    "status",
+                    "sleep" if is_sleeping(cat) else "status",
                 ),
             )
     except asyncio.CancelledError:
