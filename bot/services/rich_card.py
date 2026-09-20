@@ -90,7 +90,7 @@ async def build_rich_card(
         return f"<mark><b>{value}</b></mark>" if highlight else value
 
     action_highlights = {
-        "feed": {"fullness", "happiness", "love", "trust"},
+        "feed": {"fullness", "happiness", "love", "trust", "boredom"},
         "play": {
             "fullness",
             "happiness",
