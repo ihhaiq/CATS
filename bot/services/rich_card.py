@@ -393,6 +393,17 @@ async def build_rich_card(
 <tr><td>الملل</td><td>{boredom_cell}</td><td>{boredom_note}</td></tr>
 <tr><td>الراحة</td><td>{sleep_cell}</td><td>{sleep_note_cell}</td></tr>
 </table>
+<details>
+<summary>شنو تعني النسب؟</summary>
+<ul>
+<li><b>الشبع:</b> 0 يعني جوعانة حيل، و100 يعني شبعانة حيل.</li>
+<li><b>السعادة:</b> 0 يعني حزينة جدًا، و100 يعني فرحانة حيل.</li>
+<li><b>الحب:</b> 0 يعني ما بقى عندها حب إلك، و100 يعني تحبك حيل.</li>
+<li><b>الثقة:</b> 0 يعني ما تثق بيك أبد، و100 يعني واثقة بيك حيل.</li>
+<li><b>الملل:</b> 0 يعني مو ملانة أبد، و100 يعني عندها ملل قاتل.</li>
+<li><b>الراحة:</b> 0 يعني منهكة وما بيها حيل، و100 يعني مرتاحة حيل.</li>
+</ul>
+</details>
 <p><b>{state_hint}</b></p>
 {recommendation_html}
 <p>🐾 العملة القططية: {points}</p>
