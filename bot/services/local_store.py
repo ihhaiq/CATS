@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from bot.config import settings
@@ -13,6 +13,18 @@ from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 _lock = asyncio.Lock()
 _action_locks: dict[int, asyncio.Lock] = {}
 logger = logging.getLogger("catibot.local_store")
+
+# In-process read cache, keyed by file mtime. Every _read() used to re-parse
+# the whole JSON file from disk, even when nothing changed — the sweeps in
+# notification_sweep.py call _read() (via get_active_cats/get_cat_by_id) once
+# per active cat per cycle, which made a full-file parse happen O(cats) times
+# per sweep tick. Caching the parsed object between writes turns repeat reads
+# into an O(1) dict return. Safe as long as every mutation to a given cat's
+# dict goes through user_action_lock (the existing convention in every
+# handler and in notification_sweep.py), since that already serializes
+# concurrent writers of the same cat; this cache does not change that.
+_cache_data: dict | None = None
+_cache_mtime: float | None = None
 
 
 def user_action_lock(user_id: int) -> asyncio.Lock:
@@ -86,14 +98,23 @@ def _restore_backup(path: Path) -> dict | None:
 
 
 def _read() -> dict:
+    global _cache_data, _cache_mtime
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if not path.exists():
         data = _restore_backup(path)
         if data is None:
-            return _empty_store()
+            data = _empty_store()
+            _cache_data, _cache_mtime = data, None
+            return data
     else:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if _cache_data is not None and mtime is not None and mtime == _cache_mtime:
+            return _cache_data
         try:
             data = _load_json(path)
         except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -107,6 +128,11 @@ def _read() -> dict:
 
     for key, default in _empty_store().items():
         data.setdefault(key, default)
+    try:
+        _cache_mtime = path.stat().st_mtime
+    except OSError:
+        _cache_mtime = None
+    _cache_data = data
     return data
 
 
@@ -134,6 +160,13 @@ def _write(data: dict) -> None:
     # protects the primary from partial writes; the copy protects restarts
     # from later corruption or accidental primary-file loss.
     shutil.copy2(path, backup)
+
+    global _cache_data, _cache_mtime
+    _cache_data = data
+    try:
+        _cache_mtime = path.stat().st_mtime
+    except OSError:
+        _cache_mtime = None
 
 
 def now_iso() -> str:
@@ -1194,6 +1227,48 @@ async def ensure_user(user_id: int) -> dict:
         user.setdefault("purchases", [])
         _write(data)
         return user
+
+
+async def claim_daily_bonus(user_id: int) -> tuple[int, int] | None:
+    """Once-per-UTC-day visit bonus. Streak grows on consecutive days and
+    resets after a gap, rewarding people for coming back regularly (not for
+    grinding a single session). Returns (bonus_points, streak) the first time
+    it's claimed each day, or None if today's bonus was already claimed.
+    Call this once per user-facing interaction (e.g. right after
+    ensure_user), not on every internal helper call."""
+    async with _lock:
+        data = _read()
+        user = data["users"].setdefault(str(user_id), {
+            "user_id": user_id,
+            "points": 100,
+            "purchases": [],
+            "created_at": now_iso(),
+        })
+        today = date.today().isoformat()
+        last_claim = user.get("last_daily_claim")
+        if last_claim == today:
+            return None
+
+        gap_days = None
+        if last_claim:
+            try:
+                gap_days = (date.fromisoformat(today) - date.fromisoformat(last_claim)).days
+            except ValueError:
+                gap_days = None
+        streak = int(user.get("daily_streak", 0)) + 1 if gap_days == 1 else 1
+        bonus = min(30, 5 + (streak - 1) * 2)
+
+        user["points"] = int(user.get("points", 100)) + bonus
+        user["daily_streak"] = streak
+        user["last_daily_claim"] = today
+        data.setdefault("points_log", []).append({
+            "user_id": user_id,
+            "delta": bonus,
+            "reason": "daily_visit",
+            "ts": now_iso(),
+        })
+        _write(data)
+        return bonus, streak
 
 
 async def get_user_points(user_id: int) -> int:
