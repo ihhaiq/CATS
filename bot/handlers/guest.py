@@ -432,9 +432,17 @@ async def _guest_message_locked(message: Message) -> None:
                     else:
                         title = "🎾 لعبت وياها"
                 elif action == "walk":
-                    title = "🌿 طلعت نزهة"
+                    title = (
+                        "😾 ملت من كثرة النزهات"
+                        if int(cat.get("same_action_streak", 1)) >= 4
+                        else "🌿 طلعت نزهة"
+                    )
                 elif action == "talk":
-                    title = "💬 حچيت وياها"
+                    title = (
+                        "😾 ملت من نفس الحچي"
+                        if int(cat.get("same_action_streak", 1)) >= 4
+                        else "💬 حچيت وياها"
+                    )
                 else:
                     title = "🛋 استلقت وياك"
 
@@ -449,7 +457,15 @@ async def _guest_message_locked(message: Message) -> None:
                 else:
                     balance = await get_user_points(user_id)
 
-                if soft_interaction:
+                overused_routine = (
+                    action in {"talk", "walk"}
+                    and int(cat.get("same_action_streak", 1)) >= 4
+                )
+                if overused_routine:
+                    description = (
+                        "🌀 تكرار نفس النشاط زاد الملل؛ غيّر الروتين شوي."
+                    )
+                elif soft_interaction:
                     description = (
                         "😺 التفاعل مسموح أثناء التهدئة؛ تأثيره خفيف وبدون نقاط."
                     )
