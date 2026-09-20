@@ -38,6 +38,7 @@ def old_cat(hours: float = 24) -> dict:
         "last_care_at": None,
         "last_social_at": stamp,
         "last_talk": None,
+        "last_toy": None,
         "same_action_streak": 0,
         "sleep_day": datetime.utcnow().date().isoformat(),
         "slept_today_hours": 0.0,
@@ -108,6 +109,56 @@ class CoupledNeedsTests(unittest.TestCase):
         after_talk = cat["boredom"]
         apply_care_effects(cat, "play")
         self.assertLess(cat["boredom"], after_talk)
+
+    def test_toy_boosts_love_happiness_and_kills_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 55
+        cat["love_bar"] = 50
+        cat["boredom"] = 85
+
+        apply_care_effects(cat, "toy")
+
+        self.assertGreater(cat["happiness"], 55)
+        self.assertGreater(cat["love_bar"], 50)
+        self.assertEqual(cat["boredom"], 0)
+
+    def test_repeated_toys_eventually_create_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 60
+        cat["love_bar"] = 60
+        cat["boredom"] = 50
+
+        for _ in range(3):
+            apply_care_effects(cat, "toy")
+        before_overuse = cat["boredom"]
+
+        apply_care_effects(cat, "toy")
+        apply_care_effects(cat, "toy")
+
+        self.assertGreater(cat["boredom"], before_overuse)
+        self.assertEqual(care_reward_points(cat, "toy"), 0)
+
+    def test_long_time_without_food_reduces_trust_more(self) -> None:
+        now = datetime.utcnow()
+        neglected = old_cat(0)
+        recent = old_cat(0)
+
+        for cat in (neglected, recent):
+            cat["trust"] = 80
+            cat["hunger"] = 78
+            cat["happiness"] = 80
+            cat["love_bar"] = 80
+            cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
+            cat["rest_updated_at"] = now.isoformat()
+            cat["last_wake_at"] = now.isoformat()
+
+        neglected["last_fed"] = (now - timedelta(hours=14)).isoformat()
+        recent["last_fed"] = now.isoformat()
+
+        apply_decay(neglected)
+        apply_decay(recent)
+
+        self.assertLess(neglected["trust"], recent["trust"])
 
     def test_sleep_recovers_slower_than_awake_drain(self) -> None:
         cat = old_cat(10)

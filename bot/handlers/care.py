@@ -1,4 +1,4 @@
-"""/feed, /play, /walk and /talk care actions."""
+"""Care actions for feeding, play, toys, walks, talking and relaxing."""
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -41,6 +41,11 @@ async def cmd_feed(message: Message) -> None:
 @router.message(Command("play", "لعب"))
 async def cmd_play(message: Message) -> None:
   await _care(message, "play")
+
+
+@router.message(Command("toy", "لعبة", "العاب", "ألعاب"))
+async def cmd_toy(message: Message) -> None:
+  await _care(message, "toy")
 
 
 @router.message(Command("walk", "نزهة", "نزه"))
@@ -94,14 +99,15 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   if block_reason:
     await update_cat(cat)
     if block_reason == "starving":
-      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.")
+      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة.")
     else:
-      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو النزهة.")
+      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة.")
     return
 
   timestamp_key = {
     "feed": "last_fed",
     "play": "last_played",
+    "toy": "last_toy",
     "walk": "last_walk",
     "talk": "last_talk",
     "relax": "last_relax",
@@ -109,6 +115,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   cooldown = {
     "feed": settings.feed_cooldown,
     "play": settings.play_cooldown,
+    "toy": settings.toy_cooldown,
     "walk": settings.walk_cooldown,
     "talk": settings.talk_cooldown,
     "relax": settings.relax_cooldown,
@@ -137,6 +144,11 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
       text = "😾 ملت من نفس اللعب؛ غيّر النشاط وياها"
     else:
       text = "🎾 انبسطت القطة باللعب"
+  elif action == "toy":
+    if int(cat.get("same_action_streak", 1)) >= 4:
+      text = "😾 ملت من كثرة الألعاب؛ بدّل النشاط وياها"
+    else:
+      text = "🧸 أعطيتها لعبة واندمجت بيها"
   elif action == "walk":
     if int(cat.get("same_action_streak", 1)) >= 4:
       text = "😾 كثرت النزهات بنفس الروتين وبدت تمل"
@@ -154,7 +166,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   await update_cat(cat)
   balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
   overused_routine = (
-    action in {"talk", "walk"}
+    action in {"talk", "walk", "toy"}
     and int(cat.get("same_action_streak", 1)) >= 4
   )
   if overused_routine:

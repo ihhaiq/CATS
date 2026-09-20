@@ -39,10 +39,11 @@ async def build_rich_card(
     *,
     upload_chat_id: int | str | None = None,
 ) -> InputRichMessage:
+    asset_kind = "play" if media_kind == "toy" else media_kind
     resolved = await resolve_cat_media(
         bot,
         cat,
-        media_kind,
+        asset_kind,
         upload_chat_id=upload_chat_id,
     )
 
@@ -99,6 +100,7 @@ async def build_rich_card(
             "boredom",
             "rest",
         },
+        "toy": {"happiness", "love", "boredom"},
         "walk": {
             "fullness",
             "happiness",
@@ -140,68 +142,109 @@ async def build_rich_card(
     needs = collect_needs(cat)
     next_action = recommended_action(cat)
 
-    note_labels = {
-        "starving": "جائعة جدًا",
-        "hungry": "جائعة",
-        "peckish": "جائعة شوي",
-        "exhausted": "منهكة جدًا وتحتاج نوم",
-        "tired": "متعبة وتحتاج ترتاح",
-        "sleepy": "بدت تنعس",
-        "very_bored": "ملل قاتل",
-        "bored": "تحس بملل",
-        "restless": "بدت تمل",
-        "very_sad": "حزينة جدًا",
-        "sad": "مزاجها مو زين",
-        "love_critical": "حاسّة بإهمال قوي",
-        "love_low": "محتاجة حنان واهتمام",
-        "trust_critical": "ثقتها بيك ضعيفة جدًا",
-        "trust_low": "ثقتها بيك نازلة",
-        "walk_due": "محتاجة نزهة وتغيير جو",
-        "attention_due": "مشتاقتلك وتريد تفاعل",
-    }
-    note_priority = [
-        "starving",
-        "exhausted",
-        "very_bored",
-        "very_sad",
-        "love_critical",
-        "trust_critical",
-        "hungry",
-        "tired",
-        "bored",
-        "sad",
-        "love_low",
-        "trust_low",
-        "peckish",
-        "walk_due",
-        "sleepy",
-        "restless",
-        "attention_due",
-    ]
-    if sleeping:
-        sleep_kind = cat.get("sleep_kind")
-        note_text = (
-            "نايمة نوم رئيسي"
-            if sleep_kind == "main"
-            else "نايمة قيلولة"
-        )
-    else:
-        note_items = [
-            note_labels[item]
-            for item in note_priority
-            if item in needs and item in note_labels
-        ]
-        if 50 < sleep_need <= 75:
-            note_items.append("تحتاج استراحة بسيطة")
-        note_text = (
-            "، و".join(note_items[:2])
-            if note_items
-            else "مرتاحـة وما تحتاج شي هسه"
-        )
-    note_cell = html.escape(note_text)
+    def stat_note(kind: str, value: int) -> str:
+        value = max(0, min(100, int(value)))
+
+        if kind == "fullness":
+            if value == 100:
+                return "شبعانة حيل"
+            if value >= 80:
+                return "شبعانة"
+            if value >= 60:
+                return "شبعها زين"
+            if value >= 40:
+                return "جائعة شوي"
+            if value >= 20:
+                return "جائعة"
+            if value > 0:
+                return "جوعانة حيل"
+            return "ميتة جوع"
+
+        if kind == "happiness":
+            if value == 100:
+                return "فرحانة حيل"
+            if value >= 80:
+                return "سعيدة ورايقة"
+            if value >= 60:
+                return "مزاجها زين"
+            if value >= 40:
+                return "مزاجها عادي"
+            if value >= 20:
+                return "زعلانة شوي"
+            if value > 0:
+                return "حزينة حيل"
+            return "حزينة جدًا"
+
+        if kind == "love":
+            if value == 100:
+                return "تحبك حيل"
+            if value >= 80:
+                return "مرتبطة بيك هواية"
+            if value >= 60:
+                return "تحبك"
+            if value >= 40:
+                return "تحتاج اهتمام أكثر"
+            if value >= 20:
+                return "حاسّة بإهمال"
+            if value > 0:
+                return "حبها إلك شبه منتهي"
+            return "ما بقى عندها حب"
+
+        if kind == "trust":
+            if value == 100:
+                return "واثقة بيك حيل"
+            if value >= 80:
+                return "تثق بيك هواية"
+            if value >= 60:
+                return "ثقتها بيك زينة"
+            if value >= 40:
+                return "ثقتها متوسطة"
+            if value >= 20:
+                return "ثقتها ضعيفة"
+            if value > 0:
+                return "تقريبًا ما تثق بيك"
+            return "ما تثق بيك أبد"
+
+        if kind == "boredom":
+            if value == 0:
+                return "مو ملانة أبد"
+            if value <= 15:
+                return "مرتاحة ومستانسة"
+            if value <= 35:
+                return "بدت تمل شوي"
+            if value <= 60:
+                return "تحس بملل"
+            if value <= 80:
+                return "ملانة حيل"
+            return "ملل قاتل"
+
+        if sleeping:
+            return "نايمة وتسترجع طاقتها"
+        if value == 100:
+            return "مرتاحة حيل"
+        if value >= 80:
+            return "عندها طاقة"
+        if value >= 60:
+            return "تحتاج استراحة بسيطة"
+        if value >= 40:
+            return "متعبة شوي"
+        if value >= 20:
+            return "متعبة"
+        if value > 0:
+            return "منهكة حيل"
+        return "منهكة وما بيها حيل"
+
+    fullness_note = html.escape(stat_note("fullness", fullness))
+    happiness_note = html.escape(stat_note("happiness", happiness))
+    love_note = html.escape(stat_note("love", love))
+    trust_note = html.escape(stat_note("trust", trust))
+    boredom_note = html.escape(stat_note("boredom", boredom))
+    sleep_note_cell = html.escape(stat_note("rest", sleep_need))
+
     action_labels = {
         "feed": "🍖 إطعام",
         "play": "🎾 لعب",
+        "toy": "🧸 لعبة",
         "walk": "🌿 نزهة",
         "talk": "💬 تحدث",
         "sleep": "😴 نوم",
@@ -221,6 +264,11 @@ async def build_rich_card(
         "⚡ لعب"
         if is_action_cooldown_bypassed(cat, "play")
         else "لعب"
+    )
+    toy_label = (
+        "⚡ 🧸 اعطها لعبة"
+        if is_action_cooldown_bypassed(cat, "toy")
+        else "🧸 اعطها لعبة"
     )
     walk_label = (
         "⚡ نزهة"
@@ -260,7 +308,10 @@ async def build_rich_card(
 </tg-button-row>
 <tg-button-row align="center">
 <tg-button type="callback_data" data="{action_data('talk')}">{talk_label}</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('toy')}">{toy_label}</tg-button>
 <tg-button type="callback_data" data="{action_data('relax')}">{relax_label}</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
 <tg-button type="callback_data" data="{action_data('sleep')}">{sleep_button_label}</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
@@ -273,7 +324,7 @@ async def build_rich_card(
         "exhausted": "🪫 منهكة وتحتاج نوم طويل.",
         "tired": "😴 تعبانة وتحتاج ترتاح.",
         "very_bored": "🙀 الملل عندها صار شديد.",
-        "bored": "🌀 حست بالملل وتريد لعب أو حديث.",
+        "bored": "🌀 حست بالملل وتريد لعب، لعبة أو حديث.",
         "restless": "😼 بدت تمل وتدور شي تسويه.",
         "very_sad": "💔😿 حزينة جداً.",
         "sad": "😿 مزاجها مو زين.",
@@ -302,6 +353,7 @@ async def build_rich_card(
         ],
         "walk": ["walk_due"],
         "play": ["very_bored", "bored", "restless"],
+        "toy": ["very_bored", "bored", "restless"],
         "relax": ["sleepy", "restless"],
     }
     fallback_priority = [
@@ -345,16 +397,25 @@ async def build_rich_card(
 {media_markup}
 <hr/>
 <table bordered striped compact>
-<tr><th>الحالة</th><th>النسبة</th></tr>
-<tr><td>الشبع</td><td>{fullness_cell}</td></tr>
-<tr><td>السعادة</td><td>{happiness_cell}</td></tr>
-<tr><td>الحب</td><td>{love_cell}</td></tr>
-<tr><td>الثقة</td><td>{trust_cell}</td></tr>
-<tr><td>الملل</td><td>{boredom_cell}</td></tr>
-<tr><td>الراحة</td><td>{sleep_cell}</td></tr>
-<tr><td><b>ملاحظة</b></td><td>{note_cell}</td></tr>
+<tr><th>الحالة</th><th>النسبة</th><th>ملاحظة</th></tr>
+<tr><td>الشبع</td><td>{fullness_cell}</td><td>{fullness_note}</td></tr>
+<tr><td>السعادة</td><td>{happiness_cell}</td><td>{happiness_note}</td></tr>
+<tr><td>الحب</td><td>{love_cell}</td><td>{love_note}</td></tr>
+<tr><td>الثقة</td><td>{trust_cell}</td><td>{trust_note}</td></tr>
+<tr><td>الملل</td><td>{boredom_cell}</td><td>{boredom_note}</td></tr>
+<tr><td>الراحة</td><td>{sleep_cell}</td><td>{sleep_note_cell}</td></tr>
 </table>
-<p><i>ℹ️ الشبع: 100 = شبعانة جدًا، 0 = جائعة جدًا. الملل: 0 = مرتاحة وغير مَلّانة، 100 = ملل شديد.</i></p>
+<details>
+<summary>شنو تعني النسب؟</summary>
+<ul>
+<li><b>الشبع:</b> 0 يعني جوعانة حيل، و100 يعني شبعانة حيل.</li>
+<li><b>السعادة:</b> 0 يعني حزينة جدًا، و100 يعني فرحانة حيل.</li>
+<li><b>الحب:</b> 0 يعني ما بقى عندها حب إلك، و100 يعني تحبك حيل.</li>
+<li><b>الثقة:</b> 0 يعني ما تثق بيك أبد، و100 يعني واثقة بيك حيل.</li>
+<li><b>الملل:</b> 0 يعني مو ملانة أبد، و100 يعني عندها ملل قاتل.</li>
+<li><b>الراحة:</b> 0 يعني منهكة وما بيها حيل، و100 يعني مرتاحة حيل.</li>
+</ul>
+</details>
 <p><b>{state_hint}</b></p>
 {recommendation_html}
 <p>🐾 العملة القططية: {points}</p>

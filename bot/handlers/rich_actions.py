@@ -229,12 +229,12 @@ async def _handle_rich_action_locked(
         await update_cat(cat)
         if block_reason == "starving":
             await query.answer(
-                "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.",
+                "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة.",
                 show_alert=True,
             )
         else:
             await query.answer(
-                "🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو النزهة.",
+                "🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة.",
                 show_alert=True,
             )
         return
@@ -247,6 +247,7 @@ async def _handle_rich_action_locked(
     care_specs = {
         "feed": ("last_fed", settings.feed_cooldown),
         "play": ("last_played", settings.play_cooldown),
+        "toy": ("last_toy", settings.toy_cooldown),
         "walk": ("last_walk", settings.walk_cooldown),
         "talk": ("last_talk", settings.talk_cooldown),
         "relax": ("last_relax", settings.relax_cooldown),
@@ -281,6 +282,16 @@ async def _handle_rich_action_locked(
             notice_token = _set_action_notice(
                 cat,
                 "😾 ملت من نفس اللعب؛ تگدر تبقى تتفاعل وياها، بس غيّر النشاط حتى تستمتع أكثر.",
+            )
+        elif action == "toy" and streak >= 4:
+            notice_token = _set_action_notice(
+                cat,
+                "😾 كثرت عليها الألعاب وبدت تمل؛ بدّل النشاط وياها شوي.",
+            )
+        elif action == "toy":
+            notice_token = _set_action_notice(
+                cat,
+                "🧸 أخذت اللعبة واندمجت بيها؛ زادت سعادتها وحبها وقل مللها.",
             )
         elif action == "talk" and streak >= 4:
             notice_token = _set_action_notice(
@@ -380,7 +391,7 @@ async def _handle_rich_action_locked(
     else:
         return
 
-    if action in {"feed", "play", "walk", "talk", "relax"}:
+    if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
         points = care_reward_points(
             cat,
             action,
@@ -398,7 +409,7 @@ async def _handle_rich_action_locked(
             "⚡ قطتك كانت تحتاج هذا الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية.",
         )
     elif (
-        action in {"feed", "play", "walk", "talk", "relax"}
+        action in {"feed", "play", "toy", "walk", "talk", "relax"}
         and not cat.get("last_care_meaningful", False)
         and not notice_token
     ):

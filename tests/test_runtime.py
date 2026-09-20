@@ -69,11 +69,19 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الراحة", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
+        self.assertIn("cat:toy", card.html)
+        self.assertIn("🧸 اعطها لعبة", card.html)
         self.assertIn("cat:relax", card.html)
-        self.assertIn("ملاحظة", card.html)
-        self.assertIn("الشبع: 100 = شبعانة جدًا", card.html)
-        self.assertIn("الملل: 0 = مرتاحة وغير مَلّانة", card.html)
-        self.assertNotIn("الجوع:", card.html)
+        self.assertIn("<th>الحالة</th><th>النسبة</th><th>ملاحظة</th>", card.html)
+        self.assertIn("شبعانة", card.html)
+        self.assertIn("مرتاحة ومستانسة", card.html)
+        self.assertNotIn("<td><b>ملاحظة</b></td>", card.html)
+        self.assertIn("<details>", card.html)
+        self.assertIn("<summary>شنو تعني النسب؟</summary>", card.html)
+        self.assertIn("<ul>", card.html)
+        self.assertIn("0 يعني جوعانة حيل، و100 يعني شبعانة حيل", card.html)
+        self.assertIn("0 يعني مو ملانة أبد، و100 يعني عندها ملل قاتل", card.html)
+        self.assertIn("0 يعني منهكة وما بيها حيل، و100 يعني مرتاحة حيل", card.html)
 
     def test_rich_card_binds_controls_to_cat_id(self) -> None:
         cat = {
@@ -98,6 +106,7 @@ class RuntimeTests(unittest.TestCase):
         card = asyncio.run(build_rich_card(None, cat, 0))
         self.assertIn("cat:77:feed", card.html)
         self.assertIn("cat:77:play", card.html)
+        self.assertIn("cat:77:toy", card.html)
         self.assertIn("cat:77:status", card.html)
         self.assertNotIn('data="cat:feed"', card.html)
 
@@ -145,6 +154,42 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("ملل قاتل", card.html)
         self.assertIn("جائعة شوي", card.html)
 
+    def test_state_table_notes_cover_fullness_extremes(self) -> None:
+        from datetime import datetime
+
+        cat = {
+            "name": "Notes",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "232323",
+            "hunger": 0,
+            "happiness": 100,
+            "love_bar": 100,
+            "trust": 100,
+            "boredom": 0,
+            "rest_level": 100,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "last_relax": None,
+            "slept_today_hours": 0.0,
+        }
+
+        full_card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("شبعانة حيل", full_card.html)
+        self.assertIn("فرحانة حيل", full_card.html)
+        self.assertIn("تحبك حيل", full_card.html)
+        self.assertIn("واثقة بيك حيل", full_card.html)
+        self.assertIn("مو ملانة أبد", full_card.html)
+        self.assertIn("مرتاحة حيل", full_card.html)
+
+        starving_card = asyncio.run(
+            build_rich_card(None, dict(cat, hunger=100), 0)
+        )
+        self.assertIn("ميتة جوع", starving_card.html)
+
     def test_update_button_is_separate_and_colored(self) -> None:
         cat = {
             "name": "UI",
@@ -167,6 +212,7 @@ class RuntimeTests(unittest.TestCase):
         card = asyncio.run(build_rich_card(None, cat, 0))
         self.assertIn('style="success" data="cat:status">🔄 تحديث', card.html)
         self.assertIn("🛋 استلقاء", card.html)
+        self.assertIn("🧸 اعطها لعبة", card.html)
 
     def test_lightning_only_marks_live_cooldown_bypass(self) -> None:
         from datetime import datetime
@@ -226,6 +272,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("cat:status", card.html)
         self.assertNotIn("cat:feed", card.html)
         self.assertNotIn("cat:play", card.html)
+        self.assertNotIn("cat:toy", card.html)
         self.assertNotIn("cat:walk", card.html)
         self.assertNotIn("cat:talk", card.html)
 
@@ -260,6 +307,53 @@ class RuntimeTests(unittest.TestCase):
                     saved["happiness"] = 80
                     await update_cat(saved)
                     self.assertEqual((await get_user_cat(777))["happiness"], 80)
+
+                asyncio.run(scenario())
+            finally:
+                settings.json_data_file = previous
+
+    def test_json_backup_restores_cat_after_primary_corruption(self) -> None:
+        from bot.config import settings
+        from bot.services.local_store import create_cat, get_user_cat, now_iso, update_cat
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = settings.json_data_file
+            data_path = Path(directory) / "catibot.json"
+            settings.json_data_file = str(data_path)
+            try:
+                async def scenario() -> None:
+                    stamp = now_iso()
+                    cat = {
+                        "owner_id": 991,
+                        "name": "Protected",
+                        "breed": "black",
+                        "age_days": 30,
+                        "id_number": "991991",
+                        "hunger": 20,
+                        "happiness": 90,
+                        "love_bar": 100,
+                        "trust": 60,
+                        "boredom": 10,
+                        "is_fled": False,
+                        "last_fed": stamp,
+                        "last_played": None,
+                        "last_toy": None,
+                        "last_walk": None,
+                        "last_talk": None,
+                        "last_relax": None,
+                        "last_decay_at": stamp,
+                    }
+                    await create_cat(cat)
+                    cat["happiness"] = 88
+                    await update_cat(cat)
+
+                    self.assertTrue(Path(str(data_path) + ".bak").exists())
+                    data_path.write_text("{broken", encoding="utf-8")
+
+                    restored = await get_user_cat(991)
+                    self.assertIsNotNone(restored)
+                    self.assertEqual(restored["name"], "Protected")
+                    self.assertEqual(restored["happiness"], 88)
 
                 asyncio.run(scenario())
             finally:

@@ -1,6 +1,9 @@
 """Small JSON-backed store used for local development."""
 import asyncio
 import json
+import logging
+import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -9,6 +12,7 @@ from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
 _lock = asyncio.Lock()
 _action_locks: dict[int, asyncio.Lock] = {}
+logger = logging.getLogger("catibot.local_store")
 
 
 def user_action_lock(user_id: int) -> asyncio.Lock:
@@ -28,13 +32,8 @@ def _path() -> Path:
     return path
 
 
-def _read() -> dict:
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        return {"users": {}, "cats": [], "items": [], "user_inventory": [], "points_log": [], "media": {}}
-    data = json.loads(path.read_text(encoding="utf-8"))
-    for key, default in {
+def _empty_store() -> dict:
+    return {
         "users": {},
         "cats": [],
         "items": [],
@@ -44,14 +43,97 @@ def _read() -> dict:
         "media_types": {},
         "media_cache": {},
         "media_overrides": {},
-    }.items():
+    }
+
+
+def _backup_path(path: Path) -> Path:
+    return path.with_name(path.name + ".bak")
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    temp = path.with_name(path.name + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with temp.open("w", encoding="utf-8") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, path)
+
+
+def _load_json(path: Path) -> dict:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("JSON store root must be an object")
+    return data
+
+
+def _restore_backup(path: Path) -> dict | None:
+    backup = _backup_path(path)
+    if not backup.exists():
+        return None
+    try:
+        data = _load_json(backup)
+    except (OSError, json.JSONDecodeError, ValueError):
+        logger.exception("JSON backup is invalid: %s", backup)
+        return None
+
+    _atomic_write_text(
+        path,
+        json.dumps(data, ensure_ascii=False, indent=2),
+    )
+    logger.warning("Restored JSON store from backup: %s", backup)
+    return data
+
+
+def _read() -> dict:
+    path = _path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not path.exists():
+        data = _restore_backup(path)
+        if data is None:
+            return _empty_store()
+    else:
+        try:
+            data = _load_json(path)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            logger.error("Primary JSON store is unreadable: %s", exc)
+            data = _restore_backup(path)
+            if data is None:
+                raise RuntimeError(
+                    "Cat data store is damaged and no valid backup is available; "
+                    "refusing to start with an empty store."
+                ) from exc
+
+    for key, default in _empty_store().items():
         data.setdefault(key, default)
     return data
 
 
 def _write(data: dict) -> None:
     path = _path()
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    backup = _backup_path(path)
+
+    if path.exists():
+        try:
+            _load_json(path)
+        except (OSError, json.JSONDecodeError, ValueError):
+            logger.error(
+                "Refusing to replace backup with an invalid primary JSON store: %s",
+                path,
+            )
+        else:
+            shutil.copy2(path, backup)
+
+    _atomic_write_text(
+        path,
+        json.dumps(data, ensure_ascii=False, indent=2),
+    )
+    # Keep the backup at the same successfully written state. Atomic replace
+    # protects the primary from partial writes; the copy protects restarts
+    # from later corruption or accidental primary-file loss.
+    shutil.copy2(path, backup)
 
 
 def now_iso() -> str:
@@ -97,6 +179,8 @@ BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
 BOREDOM_RISE_PER_LONG_SLEEP_HOUR = 1.5
 LONG_SLEEP_SESSION_HOURS = 10.0
 TRUST_FALL_PER_NEGLECT_HOUR = 0.7
+UNFED_TRUST_GRACE_HOURS = 10.0
+TRUST_FALL_PER_UNFED_HOUR = 0.45
 WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
 CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
@@ -414,6 +498,17 @@ def _social_hours(cat: dict, moment: datetime) -> float:
     return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
 
 
+def _unfed_hours(cat: dict, moment: datetime) -> float:
+    value = (
+        cat.get("last_fed")
+        or cat.get("adopted_at")
+        or cat.get("created_at")
+    )
+    if not value:
+        return 0.0
+    return max(0.0, (moment - parse_time(value)).total_seconds() / 3600)
+
+
 def mark_fled_if_needed(cat: dict) -> bool:
     """Make fleeing a single runtime state, independent of which UI is used."""
     if cat.get("is_fled"):
@@ -574,6 +669,21 @@ def apply_decay(cat: dict) -> None:
         trust -= step_hours * TRUST_FALL_PER_NEGLECT_HOUR * min(
             1.0, trust_severity
         )
+
+        # Going a long time without food damages trust on its own. The grace
+        # period prevents normal meal spacing from being punished.
+        unfed_hours = _unfed_hours(cat, step_end)
+        if hunger >= 75 and unfed_hours >= UNFED_TRUST_GRACE_HOURS:
+            starvation_pressure = min(
+                1.5,
+                0.35 + (unfed_hours - UNFED_TRUST_GRACE_HOURS) * 0.06,
+            )
+            trust -= (
+                step_hours
+                * TRUST_FALL_PER_UNFED_HOUR
+                * starvation_pressure
+            )
+
         trust = max(0.0, trust)
 
         cursor = step_end
@@ -618,7 +728,7 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
     recent = (
         moment - parse_time(previous_at)
     ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
-    threshold = 4 if action in {"talk", "walk", "relax"} else 5
+    threshold = 4 if action in {"talk", "walk", "relax", "toy"} else 5
     return recent and int(cat.get("same_action_streak", 0)) >= threshold
 
 
@@ -630,12 +740,14 @@ def apply_light_interaction(cat: dict, action: str) -> None:
     cat["same_action_streak"] = streak
     cat["last_care_at"] = moment.isoformat()
 
-    if action in {"play", "walk", "talk", "relax"}:
+    if action in {"play", "walk", "talk", "relax", "toy"}:
         cat["last_social_at"] = moment.isoformat()
 
     boredom_penalty = 0
     if action == "play" and streak >= 5:
         boredom_penalty = min(15, 5 + (streak - 5) * 3)
+    elif action == "toy" and streak >= 4:
+        boredom_penalty = min(18, 6 + (streak - 4) * 4)
     elif action in {"talk", "walk"} and streak >= 4:
         boredom_penalty = min(15, (streak - 3) * 4)
 
@@ -706,6 +818,30 @@ def apply_care_effects(cat: dict, action: str) -> None:
             cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + (7 if meaningful else 3))
         cat["rest_level"] = max(0, rest_before - (7 if meaningful else 3))
+
+    elif action == "toy":
+        meaningful = (
+            boredom >= 10
+            or happiness_before <= 90
+            or love_before <= 90
+        ) and streak < 4
+
+        if streak == 1:
+            happiness_gain, love_gain, boredom_delta = 18, 6, -100
+        elif streak == 2:
+            happiness_gain, love_gain, boredom_delta = 12, 4, -28
+        elif streak == 3:
+            happiness_gain, love_gain, boredom_delta = 6, 2, -12
+        else:
+            happiness_gain, love_gain = 0, 0
+            boredom_delta = min(22, 8 + (streak - 4) * 4)
+
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, love_before + love_gain)
+        cat["boredom"] = max(0, min(100, boredom + boredom_delta))
+        cat["hunger"] = min(100, hunger_before + (4 if meaningful else 2))
+        cat["rest_level"] = max(0, rest_before - (4 if meaningful else 2))
+        cat["last_social_at"] = moment.isoformat()
 
     elif action == "walk":
         meaningful = boredom >= 25 or _walk_hours(cat, moment) >= 8
@@ -783,15 +919,16 @@ def apply_care_effects(cat: dict, action: str) -> None:
     else:
         return
 
-    if action in {"play", "walk"}:
+    if action in {"play", "walk", "toy"}:
         cat["last_social_at"] = moment.isoformat()
 
-    if action in {"talk", "walk"} and streak >= 4:
+    if action in {"talk", "walk", "toy"} and streak >= 4:
         meaningful = False
 
     trust_gain = {
         "feed": 2,
         "play": 2,
+        "toy": 1,
         "walk": 3,
         "talk": 2,
         "relax": 1,
@@ -836,6 +973,7 @@ def is_action_cooldown_bypassed(cat: dict, action: str) -> bool:
     specs = {
         "feed": ("last_fed", settings.feed_cooldown),
         "play": ("last_played", settings.play_cooldown),
+        "toy": ("last_toy", settings.toy_cooldown),
         "walk": ("last_walk", settings.walk_cooldown),
         "talk": ("last_talk", settings.talk_cooldown),
         "relax": ("last_relax", settings.relax_cooldown),
@@ -863,6 +1001,11 @@ def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
             int(cat.get("boredom", 10)) >= 35
             and not _action_overused(cat, "play", moment)
         )
+    if action == "toy":
+        return (
+            int(cat.get("boredom", 10)) >= 35
+            and not _action_overused(cat, "toy", moment)
+        )
     if action == "walk":
         return (
             _walk_hours(cat, moment) >= WALK_DUE_HOURS
@@ -884,7 +1027,7 @@ def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
 def action_block_reason(cat: dict, action: str) -> str | None:
     """Only block interactions that are physically unreasonable."""
     hunger = int(cat.get("hunger", 20))
-    if action in {"play", "walk"}:
+    if action in {"play", "walk", "toy"}:
         if hunger >= 90:
             return "starving"
         if sleep_need_percent(cat) <= 30:
@@ -910,6 +1053,7 @@ def recommended_action(cat: dict) -> str | None:
     talk_overused = _action_overused(cat, "talk", moment)
     walk_overused = _action_overused(cat, "walk", moment)
     play_overused = _action_overused(cat, "play", moment)
+    toy_overused = _action_overused(cat, "toy", moment)
 
     if attention_due and not talk_overused:
         return "talk"
@@ -918,6 +1062,8 @@ def recommended_action(cat: dict) -> str | None:
     if int(cat.get("boredom", 10)) >= 35:
         if not play_overused:
             return "play"
+        if not toy_overused:
+            return "toy"
         return "relax"
     if attention_due:
         return "relax"
@@ -940,11 +1086,12 @@ def care_reward_points(
     streak = int(cat.get("same_action_streak", 1))
     if action == "play" and streak >= 5:
         return 0
-    if action in {"talk", "walk"} and streak >= 4:
+    if action in {"talk", "walk", "toy"} and streak >= 4:
         return 0
     return {
         "feed": 5,
         "play": 5,
+        "toy": 4,
         "walk": 10,
         "talk": 3,
         "relax": 2,
