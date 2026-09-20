@@ -36,6 +36,10 @@ _ALIASES = {
     "walk": "walk",
     "نزهة": "walk",
     "نزه": "walk",
+    "relax": "relax",
+    "استلقاء": "relax",
+    "استرخاء": "relax",
+    "تلفاز": "relax",
 }
 
 
@@ -79,7 +83,7 @@ async def inline_cat(inline_query: InlineQuery) -> None:
             if cat.get("is_fled"):
                 title = "💨 هربت قطتك"
                 text = "وصل الحب إلى 0 بسبب الإهمال، وما عادت أفعال العناية متاحة."
-            elif action in {"feed", "play", "walk"}:
+            elif action in {"feed", "play", "walk", "relax"}:
                 if is_sleeping(cat):
                     title = "😴 القطة نائمة"
                     text = (
@@ -105,8 +109,14 @@ async def inline_cat(inline_query: InlineQuery) -> None:
                             "feed": "معاينة الإطعام",
                             "play": "معاينة اللعب",
                             "walk": "معاينة النزهة",
+                            "relax": "معاينة الاستلقاء",
                         }[action]
-                        icon = {"feed": "🍖", "play": "🎾", "walk": "🌿"}[action]
+                        icon = {
+                            "feed": "🍖",
+                            "play": "🎾",
+                            "walk": "🌿",
+                            "relax": "🛋",
+                        }[action]
                         text = (
                             f"{icon} معاينة فقط — ما تغير حالة القطة فعلياً\n"
                             + _state_text(preview)
