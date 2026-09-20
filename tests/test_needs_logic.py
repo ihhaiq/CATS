@@ -120,7 +120,7 @@ class CoupledNeedsTests(unittest.TestCase):
 
         self.assertGreater(cat["happiness"], 55)
         self.assertGreater(cat["love_bar"], 50)
-        self.assertLess(cat["boredom"], 85)
+        self.assertEqual(cat["boredom"], 0)
 
     def test_repeated_toys_eventually_create_boredom(self) -> None:
         cat = old_cat(0)
