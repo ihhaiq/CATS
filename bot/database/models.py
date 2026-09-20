@@ -1,8 +1,4 @@
-"""
-SQLAlchemy (async) models matching the schema in the system prompt v2, §7.
-TODO (AGENT.md step 3): run `alembic init` inside database/migrations and generate
-the first migration from these models instead of hand-writing raw SQL.
-"""
+"""SQLAlchemy models retained for the Railway PostgreSQL migration."""
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
@@ -30,7 +26,7 @@ class Cat(Base):
     name: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text, default="🏷️ الأليف")
     id_number: Mapped[str] = mapped_column(String(6), unique=True)
-    breed: Mapped[str] = mapped_column(Text)  # e.g. 'orange_tabby', 'siamese', 'black'
+    breed: Mapped[str] = mapped_column(Text)
     age_days: Mapped[int] = mapped_column(Integer, default=30)
     hunger: Mapped[int] = mapped_column(Integer, default=50)
     happiness: Mapped[int] = mapped_column(Integer, default=100)
