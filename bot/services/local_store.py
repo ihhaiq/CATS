@@ -600,51 +600,20 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
 
 
 def apply_light_interaction(cat: dict, action: str) -> None:
-    """Allow interaction during cooldown with tiny effects and no farming."""
+    """Accept interaction during cooldown without turning it into stat farming."""
     moment = datetime.utcnow()
     streak = _routine_streak(cat, action, moment)
     cat["last_care_action"] = action
     cat["same_action_streak"] = streak
     cat["last_care_at"] = moment.isoformat()
 
-    hunger = int(cat.get("hunger", 20))
-    happiness = int(cat.get("happiness", 100))
-    love = int(cat.get("love_bar", 100))
-    boredom = int(cat.get("boredom", 10))
-    rest = sleep_need_percent(cat)
-
-    if action == "feed":
-        # A snack is allowed, but a full cat does not magically become fuller.
-        if hunger > 15:
-            cat["hunger"] = max(15, hunger - 5)
-        cat["happiness"] = min(100, happiness + 1)
-    elif action == "play":
-        cat["happiness"] = min(100, happiness + 1)
-        cat["love_bar"] = min(100, love + 1)
-        cat["hunger"] = min(100, hunger + 2)
-        cat["rest_level"] = max(0, rest - 2)
+    if action in {"play", "walk", "talk", "relax"}:
+        # The interaction happened, so loneliness/social timers can acknowledge
+        # it, but need bars and rewards stay unchanged during cooldown.
         cat["last_social_at"] = moment.isoformat()
-    elif action == "walk":
-        cat["happiness"] = min(100, happiness + 1)
-        cat["love_bar"] = min(100, love + 1)
-        cat["hunger"] = min(100, hunger + 3)
-        cat["rest_level"] = max(0, rest - 3)
-        cat["last_social_at"] = moment.isoformat()
-    elif action == "talk":
-        cat["happiness"] = min(100, happiness + 1)
-        cat["love_bar"] = min(100, love + 1)
-        cat["last_social_at"] = moment.isoformat()
-    elif action == "relax":
-        cat["happiness"] = min(100, happiness + 2)
-        cat["love_bar"] = min(100, love + 1)
-        cat["boredom"] = max(0, boredom - 3)
-        cat["rest_level"] = min(100, rest + 3)
-        cat["last_social_at"] = moment.isoformat()
-    else:
-        return
 
     cat["last_care_meaningful"] = False
-    sync_decay_accumulators(cat)
+
 
 
 def apply_care_effects(cat: dict, action: str) -> None:
