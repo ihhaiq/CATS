@@ -14,6 +14,7 @@ from bot.services.economy import check_cooldown
 from bot.services.local_store import (
     apply_care_effects,
     apply_decay,
+    apply_light_interaction,
     award_points,
     clear_action_notice,
     action_block_reason,
@@ -30,6 +31,7 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_remaining_minutes,
     start_sleep,
+    sync_decay_accumulators,
     update_cat,
     user_action_lock,
     wake_now,
@@ -225,24 +227,14 @@ async def _handle_rich_action_locked(
     block_reason = action_block_reason(cat, action)
     if block_reason:
         await update_cat(cat)
-        if block_reason == "full":
-            await query.answer(
-                "😺 القطة شبعانة هسه وما تحتاج أكل زيادة.",
-                show_alert=True,
-            )
-        elif block_reason == "starving":
+        if block_reason == "starving":
             await query.answer(
                 "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.",
                 show_alert=True,
             )
-        elif block_reason == "bored_of_play":
-            await query.answer(
-                "😾 ملت من نفس اللعب. حچي وياها أو طلّعها نزهة وغيّر الروتين.",
-                show_alert=True,
-            )
         else:
             await query.answer(
-                "🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.",
+                "🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو النزهة.",
                 show_alert=True,
             )
         return
@@ -250,107 +242,63 @@ async def _handle_rich_action_locked(
     media_kind = action
     notice_token: str | None = None
     bypassed_cooldown = False
+    soft_interaction = False
 
-    if action == "feed":
-        last_fed = cat.get("last_fed")
-        if last_fed:
-            ready, left = check_cooldown(
-                parse_time(last_fed),
-                settings.feed_cooldown,
-            )
+    care_specs = {
+        "feed": ("last_fed", settings.feed_cooldown),
+        "play": ("last_played", settings.play_cooldown),
+        "walk": ("last_walk", settings.walk_cooldown),
+        "talk": ("last_talk", settings.talk_cooldown),
+        "relax": ("last_relax", settings.relax_cooldown),
+    }
+
+    if action in care_specs:
+        timestamp_key, cooldown = care_specs[action]
+        last_action = cat.get(timestamp_key)
+        if last_action:
+            ready, left = check_cooldown(parse_time(last_action), cooldown)
         else:
             ready, left = True, 0
-        need_bypass = can_bypass_action_cooldown(cat, "feed")
-        bypassed_cooldown = not ready and need_bypass
-        if not ready and not need_bypass:
-            await query.answer(
-                f"الإطعام متاح بعد {max(1, left // 60)} دقيقة.",
-                show_alert=True,
-            )
-            return
-        apply_care_effects(cat, "feed")
-        cat["last_fed"] = datetime.utcnow().isoformat()
-        points = 0
 
-    elif action == "play":
-        last_played = cat.get("last_played")
-        if last_played:
-            ready, left = check_cooldown(
-                parse_time(last_played),
-                settings.play_cooldown,
-            )
-        else:
-            ready, left = True, 0
-        need_bypass = can_bypass_action_cooldown(cat, "play")
+        need_bypass = can_bypass_action_cooldown(cat, action)
         bypassed_cooldown = not ready and need_bypass
-        if not ready and not need_bypass:
-            await query.answer(
-                f"😼 شبعت لعب هسه، جرّب بعد {max(1, left // 60)} دقيقة.",
-                show_alert=True,
-            )
-            return
-        apply_care_effects(cat, "play")
-        cat["last_played"] = datetime.utcnow().isoformat()
-        play_streak = int(cat.get("same_action_streak", 1))
-        if play_streak >= 5:
-            points = 0
+        soft_interaction = not ready and not need_bypass
+
+        if soft_interaction:
+            apply_light_interaction(cat, action)
+        else:
+            apply_care_effects(cat, action)
+            cat[timestamp_key] = datetime.utcnow().isoformat()
+
+        points = care_reward_points(
+            cat,
+            action,
+            bypassed_cooldown=bypassed_cooldown,
+        )
+
+        if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
             notice_token = _set_action_notice(
                 cat,
-                "😾 ملت من نفس اللعب، جرّب تحچي وياها أو تطلعها نزهة.",
+                "😾 ملت من نفس اللعب؛ تگدر تبقى تتفاعل وياها، بس غيّر النشاط حتى تستمتع أكثر.",
             )
-        else:
-            points = 0
-            if random.random() < 0.15:
-                notice_token = _set_action_notice(
-                    cat,
-                    "😻 اندمجت باللعب وياك وصارت تركض حولك!",
-                )
-
-    elif action == "walk":
-        last_walk = cat.get("last_walk")
-        if last_walk:
-            ready, left = check_cooldown(
-                parse_time(last_walk),
-                settings.walk_cooldown,
-            )
-        else:
-            ready, left = True, 0
-        need_bypass = can_bypass_action_cooldown(cat, "walk")
-        bypassed_cooldown = not ready and need_bypass
-        if not ready and not need_bypass:
-            await query.answer(
-                f"🌿 توها طالعة نزهة، جرّب بعد {max(1, left // 60)} دقيقة.",
-                show_alert=True,
-            )
-            return
-        apply_care_effects(cat, "walk")
-        cat["last_walk"] = datetime.utcnow().isoformat()
-        points = 0
-
-    elif action == "talk":
-        last_talk = cat.get("last_talk")
-        if last_talk:
-            ready, left = check_cooldown(
-                parse_time(last_talk),
-                settings.talk_cooldown,
-            )
-        else:
-            ready, left = True, 0
-        need_bypass = can_bypass_action_cooldown(cat, "talk")
-        bypassed_cooldown = not ready and need_bypass
-        if not ready and not need_bypass:
-            await query.answer(
-                f"خليها تستوعب الحچي شوي 😺 ارجع بعد {max(1, left // 60)} دقيقة.",
-                show_alert=True,
-            )
-            return
-        apply_care_effects(cat, "talk")
-        cat["last_talk"] = datetime.utcnow().isoformat()
-        points = 0
-        if cat.get("last_care_meaningful") and random.random() < 0.15:
+        elif action == "relax":
             notice_token = _set_action_notice(
                 cat,
-                "😽 قربت منك وصارت تتمسح بيك من كثر ما ارتاحت للحچي.",
+                "🛋 استلقت يمك بهدوء وصارت تتابع التلفاز وياك.",
+            )
+        elif (
+            action in {"play", "talk"}
+            and not soft_interaction
+            and cat.get("last_care_meaningful")
+            and random.random() < 0.15
+        ):
+            notice_token = _set_action_notice(
+                cat,
+                (
+                    "😻 اندمجت باللعب وياك وصارت تركض حولك!"
+                    if action == "play"
+                    else "😽 قربت منك وصارت تتمسح بيك من كثر ما ارتاحت للحچي."
+                ),
             )
 
     elif action == "sleep":
@@ -405,6 +353,7 @@ async def _handle_rich_action_locked(
                     0,
                     int(cat.get("trust", 60)) - trust_loss,
                 )
+                sync_decay_accumulators(cat)
                 notice_token = _set_action_notice(
                     cat,
                     f"😾 صحّيتها قبل ما تشبع نوم، الثقة نزلت {trust_loss}.",
@@ -420,26 +369,31 @@ async def _handle_rich_action_locked(
     else:
         return
 
-    if action in {"feed", "play", "walk", "talk"}:
+    if action in {"feed", "play", "walk", "talk", "relax"}:
         points = care_reward_points(
             cat,
             action,
             bypassed_cooldown=bypassed_cooldown,
         )
 
-    if bypassed_cooldown and not notice_token:
+    if soft_interaction and not notice_token:
         notice_token = _set_action_notice(
             cat,
-            "⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل. الرعاية تنحسب، لكن بدون نقاط إضافية.",
+            "😺 التفاعل مسموح، بس التهدئة بعدها شغالة؛ تأثيره خفيف وبدون نقاط.",
+        )
+    elif bypassed_cooldown and not notice_token:
+        notice_token = _set_action_notice(
+            cat,
+            "⚡ قطتك كانت تحتاج هذا الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية.",
         )
     elif (
-        action in {"feed", "play", "walk", "talk"}
+        action in {"feed", "play", "walk", "talk", "relax"}
         and not cat.get("last_care_meaningful", False)
         and not notice_token
     ):
         notice_token = _set_action_notice(
             cat,
-            "😺 هذا تفاعل اختياري؛ ما كانت محتاجته هسه، لذلك بدون نقاط.",
+            "😺 هذا تفاعل اختياري؛ مسموح عادي، بس فائدته بسيطة وبدون نقاط.",
         )
 
     balance = await get_user_points(user_id)
