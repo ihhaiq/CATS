@@ -209,9 +209,9 @@ def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
     rest += asleep * recovery
     rest -= awake * REST_FALL_PER_AWAKE_HOUR
 
-    cat["rest_level"] = max(0, min(100, round(rest)))
+    cat["rest_level"] = max(0.0, min(100.0, rest))
     cat["rest_updated_at"] = moment.isoformat()
-    return int(cat["rest_level"])
+    return int(round(cat["rest_level"]))
 
 
 def sleep_need_percent(cat: dict) -> int:
@@ -460,7 +460,7 @@ def apply_decay(cat: dict) -> None:
         mark_fled_if_needed(cat)
         return
 
-    rest_before = int(cat.get("rest_level", 100))
+    rest_before = float(cat.get("rest_level", 100))
     rest_after = _refresh_rest(cat, now)
 
     hunger = _decay_value(cat, "hunger", 20)
