@@ -172,11 +172,11 @@ async def build_rich_card(
         "sad",
         "love_low",
         "trust_low",
+        "peckish",
         "walk_due",
-        "attention_due",
         "sleepy",
         "restless",
-        "peckish",
+        "attention_due",
     ]
     if sleeping:
         sleep_kind = cat.get("sleep_kind")
