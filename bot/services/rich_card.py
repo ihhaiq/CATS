@@ -39,10 +39,11 @@ async def build_rich_card(
     *,
     upload_chat_id: int | str | None = None,
 ) -> InputRichMessage:
+    asset_kind = "play" if media_kind == "toy" else media_kind
     resolved = await resolve_cat_media(
         bot,
         cat,
-        media_kind,
+        asset_kind,
         upload_chat_id=upload_chat_id,
     )
 
@@ -99,6 +100,7 @@ async def build_rich_card(
             "boredom",
             "rest",
         },
+        "toy": {"happiness", "love", "boredom"},
         "walk": {
             "fullness",
             "happiness",
@@ -242,6 +244,7 @@ async def build_rich_card(
     action_labels = {
         "feed": "🍖 إطعام",
         "play": "🎾 لعب",
+        "toy": "🧸 لعبة",
         "walk": "🌿 نزهة",
         "talk": "💬 تحدث",
         "sleep": "😴 نوم",
@@ -261,6 +264,11 @@ async def build_rich_card(
         "⚡ لعب"
         if is_action_cooldown_bypassed(cat, "play")
         else "لعب"
+    )
+    toy_label = (
+        "⚡ 🧸 اعطها لعبة"
+        if is_action_cooldown_bypassed(cat, "toy")
+        else "🧸 اعطها لعبة"
     )
     walk_label = (
         "⚡ نزهة"
@@ -300,7 +308,10 @@ async def build_rich_card(
 </tg-button-row>
 <tg-button-row align="center">
 <tg-button type="callback_data" data="{action_data('talk')}">{talk_label}</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('toy')}">{toy_label}</tg-button>
 <tg-button type="callback_data" data="{action_data('relax')}">{relax_label}</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
 <tg-button type="callback_data" data="{action_data('sleep')}">{sleep_button_label}</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
@@ -342,6 +353,7 @@ async def build_rich_card(
         ],
         "walk": ["walk_due"],
         "play": ["very_bored", "bored", "restless"],
+        "toy": ["very_bored", "bored", "restless"],
         "relax": ["sleepy", "restless"],
     }
     fallback_priority = [
