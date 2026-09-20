@@ -94,6 +94,8 @@ HUNGER_RISE_PER_AWAKE_HOUR = 3.0
 HUNGER_RISE_PER_SLEEP_HOUR = 1.0
 BOREDOM_RISE_PER_AWAKE_HOUR = 1.5
 BOREDOM_RISE_PER_OVERSLEEP_HOUR = 2.0
+BOREDOM_RISE_PER_LONG_SLEEP_HOUR = 1.5
+LONG_SLEEP_SESSION_HOURS = 10.0
 TRUST_FALL_PER_NEGLECT_HOUR = 0.7
 WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
@@ -170,6 +172,22 @@ def _oversleep_between(cat: dict, start: datetime, end: datetime) -> float:
     )
 
 
+def _long_sleep_between(cat: dict, start: datetime, end: datetime) -> float:
+    """Sleep beyond 10 continuous hours starts becoming boring."""
+    started = cat.get("sleep_started_at")
+    until = cat.get("sleep_until")
+    if not started or not until or end <= start:
+        return 0.0
+
+    threshold = parse_time(started) + timedelta(hours=LONG_SLEEP_SESSION_HOURS)
+    sleep_end = parse_time(until)
+    overlap_start = max(start, threshold)
+    overlap_end = min(end, sleep_end)
+    if overlap_end <= overlap_start:
+        return 0.0
+    return (overlap_end - overlap_start).total_seconds() / 3600
+
+
 def _commit_sleep_today(cat: dict, moment: datetime) -> None:
     """Commit only the part of the finished session that belongs to today."""
     saved = (
@@ -209,9 +227,9 @@ def _refresh_rest(cat: dict, moment: datetime | None = None) -> int:
     rest += asleep * recovery
     rest -= awake * REST_FALL_PER_AWAKE_HOUR
 
-    cat["rest_level"] = max(0, min(100, round(rest)))
+    cat["rest_level"] = max(0.0, min(100.0, rest))
     cat["rest_updated_at"] = moment.isoformat()
-    return int(cat["rest_level"])
+    return int(round(cat["rest_level"]))
 
 
 def sleep_need_percent(cat: dict) -> int:
@@ -417,6 +435,34 @@ def mark_fled_if_needed(cat: dict) -> bool:
     return True
 
 
+def _decay_value(cat: dict, key: str, default: int) -> float:
+    """Keep fractional decay so frequent refreshes never erase slow changes."""
+    hidden_key = f"_decay_{key}"
+    visible = float(cat.get(key, default))
+    stored = cat.get(hidden_key)
+    if stored is None:
+        return visible
+
+    stored_value = float(stored)
+    # If another action changed the visible stat, trust the visible value and
+    # restart the fractional accumulator from there.
+    if round(stored_value) != round(visible):
+        return visible
+    return stored_value
+
+
+def sync_decay_accumulators(cat: dict) -> None:
+    """Sync hidden fractional counters after an explicit interaction change."""
+    for key, default in {
+        "hunger": 20,
+        "happiness": 100,
+        "love_bar": 100,
+        "trust": 60,
+        "boredom": 10,
+    }.items():
+        cat[f"_decay_{key}"] = float(cat.get(key, default))
+
+
 def apply_decay(cat: dict) -> None:
     """Advance needs in small time slices so neglect is never backdated."""
     if cat.get("is_fled"):
@@ -432,14 +478,14 @@ def apply_decay(cat: dict) -> None:
         mark_fled_if_needed(cat)
         return
 
-    rest_before = int(cat.get("rest_level", 100))
+    rest_before = float(cat.get("rest_level", 100))
     rest_after = _refresh_rest(cat, now)
 
-    hunger = float(cat.get("hunger", 20))
-    happiness = float(cat.get("happiness", 100))
-    love = float(cat.get("love_bar", 100))
-    trust = float(cat.get("trust", 60))
-    boredom = float(cat.get("boredom", 10))
+    hunger = _decay_value(cat, "hunger", 20)
+    happiness = _decay_value(cat, "happiness", 100)
+    love = _decay_value(cat, "love_bar", 100)
+    trust = _decay_value(cat, "trust", 60)
+    boredom = _decay_value(cat, "boredom", 10)
 
     cursor = last_decay
     total_seconds = max(1.0, (now - last_decay).total_seconds())
@@ -468,6 +514,10 @@ def apply_decay(cat: dict) -> None:
         boredom += (
             _oversleep_between(cat, cursor, step_end)
             * BOREDOM_RISE_PER_OVERSLEEP_HOUR
+        )
+        boredom += (
+            _long_sleep_between(cat, cursor, step_end)
+            * BOREDOM_RISE_PER_LONG_SLEEP_HOUR
         )
         boredom = min(100.0, boredom)
 
@@ -528,11 +578,21 @@ def apply_decay(cat: dict) -> None:
 
         cursor = step_end
 
-    cat["hunger"] = max(0, min(100, round(hunger)))
-    cat["happiness"] = max(0, min(100, round(happiness)))
-    cat["love_bar"] = max(0, min(100, round(love)))
-    cat["trust"] = max(0, min(100, round(trust)))
-    cat["boredom"] = max(0, min(100, round(boredom)))
+    hunger = max(0.0, min(100.0, hunger))
+    happiness = max(0.0, min(100.0, happiness))
+    love = max(0.0, min(100.0, love))
+    trust = max(0.0, min(100.0, trust))
+    boredom = max(0.0, min(100.0, boredom))
+    cat["_decay_hunger"] = hunger
+    cat["_decay_happiness"] = happiness
+    cat["_decay_love_bar"] = love
+    cat["_decay_trust"] = trust
+    cat["_decay_boredom"] = boredom
+    cat["hunger"] = round(hunger)
+    cat["happiness"] = round(happiness)
+    cat["love_bar"] = round(love)
+    cat["trust"] = round(trust)
+    cat["boredom"] = round(boredom)
     cat["last_decay_at"] = now.isoformat()
     mark_fled_if_needed(cat)
 
@@ -561,8 +621,36 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
     return recent and int(cat.get("same_action_streak", 0)) >= 5
 
 
+def apply_light_interaction(cat: dict, action: str) -> None:
+    """Accept interaction during cooldown without turning it into stat farming."""
+    moment = datetime.utcnow()
+    streak = _routine_streak(cat, action, moment)
+    cat["last_care_action"] = action
+    cat["same_action_streak"] = streak
+    cat["last_care_at"] = moment.isoformat()
+
+    if action in {"play", "walk", "talk", "relax"}:
+        cat["last_social_at"] = moment.isoformat()
+
+    boredom_penalty = 0
+    if action == "play" and streak >= 5:
+        boredom_penalty = min(15, 5 + (streak - 5) * 3)
+    elif action in {"talk", "walk"} and streak >= 4:
+        boredom_penalty = min(15, (streak - 3) * 4)
+
+    if boredom_penalty:
+        cat["boredom"] = min(
+            100,
+            int(cat.get("boredom", 10)) + boredom_penalty,
+        )
+        sync_decay_accumulators(cat)
+
+    cat["last_care_meaningful"] = False
+
+
+
 def apply_care_effects(cat: dict, action: str) -> None:
-    """Apply care; useful variety builds trust, mindless repetition does not."""
+    """Apply full care; stable cats can still interact without stat farming."""
     moment = datetime.utcnow()
     streak = _routine_streak(cat, action, moment)
     cat["last_care_action"] = action
@@ -571,6 +659,8 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
     boredom = int(cat.get("boredom", 10))
     trust = int(cat.get("trust", 60))
+    love_before = int(cat.get("love_bar", 100))
+    rest_before = sleep_need_percent(cat)
     novelty = max(0.25, 1.0 - max(0, streak - 2) * 0.25)
     hunger_before = int(cat.get("hunger", 20))
     happiness_before = int(cat.get("happiness", 100))
@@ -578,16 +668,24 @@ def apply_care_effects(cat: dict, action: str) -> None:
     meaningful = True
     if action == "feed":
         meaningful = hunger_before >= 35
-        cat["hunger"] = max(0, hunger_before - 40)
+        if meaningful:
+            cat["hunger"] = max(0, hunger_before - 40)
+            boredom_drop = 10
+        elif hunger_before > 15:
+            cat["hunger"] = max(15, hunger_before - 10)
+            boredom_drop = 4
+        else:
+            cat["hunger"] = hunger_before
+            boredom_drop = 1
         cat["happiness"] = min(100, happiness_before + (8 if meaningful else 1))
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + (3 if meaningful else 0))
-        if streak >= 3 and not meaningful:
-            cat["boredom"] = min(100, boredom + 4)
+        cat["love_bar"] = min(100, love_before + (3 if meaningful else 0))
+        cat["boredom"] = max(0, boredom - boredom_drop)
+
     elif action == "play":
-        # Play has diminishing returns. Repeating it too often inside the
-        # routine window eventually becomes boring instead of stimulating.
         meaningful = (boredom >= 20 or happiness_before <= 80) and streak < 5
-        if streak == 1:
+        if not meaningful and streak < 5:
+            happiness_gain, love_gain, boredom_delta = 1, 1, 0
+        elif streak == 1:
             happiness_gain, love_gain, boredom_delta = 24, 5, -35
         elif streak == 2:
             happiness_gain, love_gain, boredom_delta = 20, 4, -28
@@ -600,46 +698,100 @@ def apply_care_effects(cat: dict, action: str) -> None:
             boredom_delta = min(20, 8 + (streak - 5) * 4)
 
         cat["happiness"] = min(100, happiness_before + happiness_gain)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
+        cat["love_bar"] = min(100, love_before + love_gain)
         if streak >= 5:
             cat["boredom"] = min(100, max(45, boredom + boredom_delta))
         else:
             cat["boredom"] = max(0, min(100, boredom + boredom_delta))
-        cat["hunger"] = min(100, hunger_before + 7)
-        cat["rest_level"] = max(0, sleep_need_percent(cat) - 7)
+        cat["hunger"] = min(100, hunger_before + (7 if meaningful else 3))
+        cat["rest_level"] = max(0, rest_before - (7 if meaningful else 3))
+
     elif action == "walk":
         meaningful = boredom >= 25 or _walk_hours(cat, moment) >= 8
-        cat["happiness"] = min(100, happiness_before + 20)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + 7)
-        cat["boredom"] = max(0, boredom - round(22 * novelty))
-        cat["hunger"] = min(100, hunger_before + 10)
-        cat["rest_level"] = max(0, sleep_need_percent(cat) - 12)
+
+        if streak == 1:
+            happiness_gain, love_gain = ((20, 7) if meaningful else (2, 1))
+            boredom_delta = -22 if meaningful else -2
+        elif streak == 2:
+            happiness_gain, love_gain = ((12, 5) if meaningful else (1, 1))
+            boredom_delta = -14 if meaningful else 0
+        elif streak == 3:
+            happiness_gain, love_gain = ((6, 3) if meaningful else (1, 0))
+            boredom_delta = -6 if meaningful else 2
+        elif streak == 4:
+            happiness_gain, love_gain, boredom_delta = 2, 1, 4
+        elif streak == 5:
+            happiness_gain, love_gain, boredom_delta = 1, 0, 8
+        else:
+            happiness_gain, love_gain = 0, 0
+            boredom_delta = min(15, 10 + (streak - 6) * 2)
+
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, love_before + love_gain)
+        cat["boredom"] = max(0, min(100, boredom + boredom_delta))
+        cat["hunger"] = min(100, hunger_before + (10 if meaningful else 4))
+        cat["rest_level"] = max(0, rest_before - (12 if meaningful else 5))
+
     elif action == "talk":
         meaningful = (
             boredom >= 15
             or happiness_before <= 85
             or trust <= 65
-            or int(cat.get("love_bar", 100)) <= 50
+            or love_before <= 50
         )
+
         if streak == 1:
-            happiness_gain, love_gain = 7, 3
+            happiness_gain, love_gain = ((7, 3) if meaningful else (1, 1))
+            boredom_delta = -20 if meaningful else 0
         elif streak == 2:
-            happiness_gain, love_gain = 5, 2
+            happiness_gain, love_gain = ((5, 2) if meaningful else (1, 0))
+            boredom_delta = -12 if meaningful else 0
         elif streak == 3:
-            happiness_gain, love_gain = 3, 1
+            happiness_gain, love_gain = ((3, 1) if meaningful else (1, 0))
+            boredom_delta = -5 if meaningful else 0
+        elif streak == 4:
+            happiness_gain, love_gain, boredom_delta = 1, 0, 3
+        elif streak == 5:
+            happiness_gain, love_gain, boredom_delta = 0, 0, 7
         else:
-            happiness_gain, love_gain = 1, 0
+            happiness_gain, love_gain = 0, 0
+            boredom_delta = min(15, 10 + (streak - 6) * 2)
+
         cat["happiness"] = min(100, happiness_before + happiness_gain)
-        cat["love_bar"] = min(100, int(cat["love_bar"]) + love_gain)
-        cat["boredom"] = max(0, boredom - round(25 * novelty))
+        cat["love_bar"] = min(100, love_before + love_gain)
+        cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["last_social_at"] = moment.isoformat()
+
+    elif action == "relax":
+        meaningful = (
+            rest_before <= 85
+            or boredom >= 15
+            or happiness_before <= 85
+        )
+        if meaningful:
+            happiness_gain, love_gain, boredom_drop, rest_gain = 4, 2, 10, 8
+        else:
+            happiness_gain, love_gain, boredom_drop, rest_gain = 1, 1, 0, 2
+        cat["happiness"] = min(100, happiness_before + happiness_gain)
+        cat["love_bar"] = min(100, love_before + love_gain)
+        cat["boredom"] = max(0, boredom - boredom_drop)
+        cat["rest_level"] = min(100, rest_before + rest_gain)
+        cat["hunger"] = min(100, hunger_before + 1)
+        cat["last_social_at"] = moment.isoformat()
+
     else:
         return
 
     if action in {"play", "walk"}:
         cat["last_social_at"] = moment.isoformat()
 
-    trust_gain = {"feed": 2, "play": 2, "walk": 3, "talk": 2}[action]
+    trust_gain = {
+        "feed": 2,
+        "play": 2,
+        "walk": 3,
+        "talk": 2,
+        "relax": 1,
+    }[action]
     if not meaningful:
         trust_gain = 0
     elif streak >= 3:
@@ -647,12 +799,13 @@ def apply_care_effects(cat: dict, action: str) -> None:
     cat["trust"] = min(100, trust + trust_gain)
     cat["last_care_meaningful"] = bool(meaningful)
 
-    # Repeating one interaction inside a short window becomes less stimulating.
-    if action in {"talk", "walk"} and streak >= 4:
+    if action == "relax" and streak >= 4:
         cat["boredom"] = min(
             100,
-            int(cat.get("boredom", 0)) + min(15, (streak - 3) * 4),
+            int(cat.get("boredom", 0)) + min(12, (streak - 3) * 3),
         )
+
+    sync_decay_accumulators(cat)
 
 
 def _attention_due(cat: dict, moment: datetime) -> bool:
@@ -681,6 +834,7 @@ def is_action_cooldown_bypassed(cat: dict, action: str) -> bool:
         "play": ("last_played", settings.play_cooldown),
         "walk": ("last_walk", settings.walk_cooldown),
         "talk": ("last_talk", settings.talk_cooldown),
+        "relax": ("last_relax", settings.relax_cooldown),
     }
     spec = specs.get(action)
     if spec is None:
@@ -709,21 +863,19 @@ def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
         return _walk_hours(cat, moment) >= WALK_DUE_HOURS
     if action == "talk":
         return _attention_due(cat, moment)
+    if action == "relax":
+        return sleep_need_percent(cat) <= 75 or int(cat.get("boredom", 10)) >= 35
     return False
 
 
 def action_block_reason(cat: dict, action: str) -> str | None:
-    """Return a higher-priority need that makes an action illogical."""
+    """Only block interactions that are physically unreasonable."""
     hunger = int(cat.get("hunger", 20))
-    if action == "feed" and hunger <= 15:
-        return "full"
     if action in {"play", "walk"}:
         if hunger >= 90:
             return "starving"
         if sleep_need_percent(cat) <= 30:
             return "tired"
-    if action == "play" and _action_overused(cat, "play", datetime.utcnow()):
-        return "bored_of_play"
     return None
 
 
@@ -750,6 +902,8 @@ def recommended_action(cat: dict) -> str | None:
         return "play"
     if rest <= 50:
         return "sleep"
+    if rest <= 75:
+        return "relax"
     return None
 
 
@@ -769,6 +923,7 @@ def care_reward_points(
         "play": 5,
         "walk": 10,
         "talk": 3,
+        "relax": 2,
     }.get(action, 0)
 
 
