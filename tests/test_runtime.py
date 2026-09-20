@@ -74,6 +74,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("شبعانة", card.html)
         self.assertIn("مرتاحة ومستانسة", card.html)
         self.assertNotIn("<td><b>ملاحظة</b></td>", card.html)
+        self.assertIn("<details>", card.html)
+        self.assertIn("<summary>شنو تعني النسب؟</summary>", card.html)
+        self.assertIn("<ul>", card.html)
+        self.assertIn("0 يعني جوعانة حيل، و100 يعني شبعانة حيل", card.html)
+        self.assertIn("0 يعني مو ملانة أبد، و100 يعني عندها ملل قاتل", card.html)
+        self.assertIn("0 يعني منهكة وما بيها حيل، و100 يعني مرتاحة حيل", card.html)
 
     def test_rich_card_binds_controls_to_cat_id(self) -> None:
         cat = {
