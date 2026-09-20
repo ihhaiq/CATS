@@ -16,6 +16,7 @@ from bot.services.local_store import (
    collect_needs,
    finish_sleep,
    get_active_cats,
+   get_cat_by_id,
    is_sleeping,
    notification_gap_seconds,
    sleep_ready_to_finish,
@@ -104,11 +105,7 @@ async def _wake_sweep(bot: Bot) -> None:
          async with user_action_lock(owner_id):
             # Reload after acquiring the user lock so we never overwrite a
             # button/command interaction with an older sweep snapshot.
-            cats = await get_active_cats()
-            cat = next(
-               (item for item in cats if item["cat_id"] == snapshot["cat_id"]),
-               None,
-            )
+            cat = await get_cat_by_id(snapshot["cat_id"], include_fled=True)
             if cat is None:
                continue
 
@@ -136,11 +133,7 @@ async def _sweep(bot: Bot) -> None:
       for snapshot in await get_active_cats():
          owner_id = int(snapshot["owner_id"])
          async with user_action_lock(owner_id):
-            cats = await get_active_cats()
-            cat = next(
-               (item for item in cats if item["cat_id"] == snapshot["cat_id"]),
-               None,
-            )
+            cat = await get_cat_by_id(snapshot["cat_id"], include_fled=True)
             if cat is None:
                continue
             # Decay first while sleep interval metadata still exists, then finalize wake.
@@ -175,9 +168,26 @@ async def _sweep(bot: Bot) -> None:
                or (datetime.utcnow() - datetime.fromisoformat(last_at)).total_seconds()
                >= gap
             )
+            urgent_set = {
+               "love_critical",
+               "trust_critical",
+               "starving",
+               "exhausted",
+               "very_bored",
+               "very_sad",
+            }
+            previous_needs = set((cat.get("last_notified_state") or "").split("|"))
+            # A brand-new urgent need always breaks through immediately. Any
+            # other change (mild need flipping in/out near a threshold) still
+            # has to respect the gap, so the cat doesn't ping the owner every
+            # few minutes while a stat oscillates around a boundary.
+            new_urgent_need = bool((set(needs) & urgent_set) - previous_needs)
 
-            if state and (state != cat.get("last_notified_state") or enough_gap):
-               details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in needs)
+            if state and (enough_gap or new_urgent_need):
+               top_needs = needs[:3]
+               details = "\n".join(f"• {_NEED_MESSAGES[item]}" for item in top_needs)
+               if len(needs) > len(top_needs):
+                  details += f"\n• …وشوية أمور ثانية تحتاج وقتك."
                urgent = any(
                   item in {
                      "love_critical",
