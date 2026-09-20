@@ -70,10 +70,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
         self.assertIn("cat:relax", card.html)
-        self.assertIn("ملاحظة", card.html)
-        self.assertIn("الشبع: 100 = شبعانة جدًا", card.html)
-        self.assertIn("الملل: 0 = مرتاحة وغير مَلّانة", card.html)
-        self.assertNotIn("الجوع:", card.html)
+        self.assertIn("<th>الحالة</th><th>النسبة</th><th>ملاحظة</th>", card.html)
+        self.assertIn("شبعانة", card.html)
+        self.assertIn("مرتاحة ومستانسة", card.html)
+        self.assertNotIn("<td><b>ملاحظة</b></td>", card.html)
 
     def test_rich_card_binds_controls_to_cat_id(self) -> None:
         cat = {
@@ -144,6 +144,42 @@ class RuntimeTests(unittest.TestCase):
         card = asyncio.run(build_rich_card(None, cat, 0))
         self.assertIn("ملل قاتل", card.html)
         self.assertIn("جائعة شوي", card.html)
+
+    def test_state_table_notes_cover_fullness_extremes(self) -> None:
+        from datetime import datetime
+
+        cat = {
+            "name": "Notes",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "232323",
+            "hunger": 0,
+            "happiness": 100,
+            "love_bar": 100,
+            "trust": 100,
+            "boredom": 0,
+            "rest_level": 100,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "last_relax": None,
+            "slept_today_hours": 0.0,
+        }
+
+        full_card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("شبعانة حيل", full_card.html)
+        self.assertIn("فرحانة حيل", full_card.html)
+        self.assertIn("تحبك حيل", full_card.html)
+        self.assertIn("واثقة بيك حيل", full_card.html)
+        self.assertIn("مو ملانة أبد", full_card.html)
+        self.assertIn("مرتاحة حيل", full_card.html)
+
+        starving_card = asyncio.run(
+            build_rich_card(None, dict(cat, hunger=100), 0)
+        )
+        self.assertIn("ميتة جوع", starving_card.html)
 
     def test_update_button_is_separate_and_colored(self) -> None:
         cat = {
