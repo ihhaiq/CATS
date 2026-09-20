@@ -139,6 +139,60 @@ async def build_rich_card(
 
     needs = collect_needs(cat)
     next_action = recommended_action(cat)
+
+    note_labels = {
+        "starving": "جائعة جدًا",
+        "hungry": "جائعة",
+        "peckish": "جائعة شوي",
+        "exhausted": "منهكة جدًا وتحتاج نوم",
+        "tired": "متعبة وتحتاج ترتاح",
+        "sleepy": "بدت تنعس",
+        "very_bored": "ملل قاتل",
+        "bored": "تحس بملل",
+        "restless": "بدت تمل",
+        "very_sad": "حزينة جدًا",
+        "sad": "مزاجها مو زين",
+        "love_critical": "حاسّة بإهمال قوي",
+        "love_low": "محتاجة حنان واهتمام",
+        "trust_critical": "ثقتها بيك ضعيفة جدًا",
+        "trust_low": "ثقتها بيك نازلة",
+        "walk_due": "محتاجة نزهة وتغيير جو",
+        "attention_due": "مشتاقتلك وتريد تفاعل",
+    }
+    note_priority = [
+        "starving",
+        "exhausted",
+        "very_bored",
+        "very_sad",
+        "love_critical",
+        "trust_critical",
+        "hungry",
+        "tired",
+        "bored",
+        "sad",
+        "love_low",
+        "trust_low",
+        "walk_due",
+        "attention_due",
+        "sleepy",
+        "restless",
+        "peckish",
+    ]
+    if sleeping:
+        sleep_kind = cat.get("sleep_kind")
+        note_text = (
+            "نايمة نوم رئيسي"
+            if sleep_kind == "main"
+            else "نايمة قيلولة"
+        )
+    else:
+        note_items = [
+            note_labels[item]
+            for item in note_priority
+            if item in needs and item in note_labels
+        ][:2]
+        note_text = "، و".join(note_items) if note_items else "مرتاحـة وما تحتاج شي هسه"
+    note_cell = html.escape(note_text)
     action_labels = {
         "feed": "🍖 إطعام",
         "play": "🎾 لعب",
@@ -292,6 +346,7 @@ async def build_rich_card(
 <tr><td>الثقة</td><td>{trust_cell}</td></tr>
 <tr><td>الملل</td><td>{boredom_cell}</td></tr>
 <tr><td>الراحة</td><td>{sleep_cell}</td></tr>
+<tr><td><b>ملاحظة</b></td><td>{note_cell}</td></tr>
 </table>
 <p><i>ℹ️ الشبع: 100 = شبعانة جدًا، 0 = جائعة جدًا. الملل: 0 = مرتاحة وغير مَلّانة، 100 = ملل شديد.</i></p>
 <p><b>{state_hint}</b></p>
