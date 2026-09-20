@@ -1,6 +1,7 @@
 """Storage initialization for local JSON mode and future PostgreSQL mode."""
 import json
 import logging
+import shutil
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -23,22 +24,30 @@ def _json_path() -> Path:
 
 def _init_json_store() -> None:
     path = _json_path()
+    backup = path.with_name(path.name + ".bak")
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists():
-        path.write_text(
-            json.dumps(
-                {
-                    "users": {},
-                    "cats": [],
-                    "items": [],
-                    "user_inventory": [],
-                    "points_log": [],
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+    if path.exists():
+        return
+
+    if backup.exists():
+        shutil.copy2(backup, path)
+        logger.warning("Restored JSON storage from backup: %s", backup)
+        return
+
+    path.write_text(
+        json.dumps(
+            {
+                "users": {},
+                "cats": [],
+                "items": [],
+                "user_inventory": [],
+                "points_log": [],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 if settings.storage_backend == "postgres":
