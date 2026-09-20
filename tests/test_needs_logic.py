@@ -221,6 +221,16 @@ class CoupledNeedsTests(unittest.TestCase):
             sleep_need_percent(cat)
         self.assertLess(cat["rest_level"], 100.0)
 
+    def test_overused_talk_is_not_recommended_or_bypassed(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 70
+        cat["last_care_action"] = "talk"
+        cat["same_action_streak"] = 4
+        cat["last_care_at"] = datetime.utcnow().isoformat()
+        cat["last_talk"] = datetime.utcnow().isoformat()
+        self.assertFalse(can_bypass_action_cooldown(cat, "talk"))
+        self.assertNotEqual(recommended_action(cat), "talk")
+
     def test_routine_streak_expires_after_six_hours(self) -> None:
         cat = old_cat(0)
         cat["last_care_action"] = "talk"
