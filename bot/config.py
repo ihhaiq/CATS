@@ -8,12 +8,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _default_json_data_file() -> str:
+    configured = os.getenv("JSON_DATA_FILE", "").strip()
+    volume_mount = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if volume_mount and (not configured or configured == "data/catibot.json"):
+        return os.path.join(volume_mount, "catibot.json")
+    return configured or "data/catibot.json"
+
+
 @dataclass
 class Settings:
     bot_token: str = os.getenv("BOT_TOKEN", "")
     storage_backend: str = os.getenv("STORAGE_BACKEND", "json").lower()
     database_url: str = os.getenv("DATABASE_URL", "")
-    json_data_file: str = os.getenv("JSON_DATA_FILE", "data/catibot.json")
+    json_data_file: str = _default_json_data_file()
     status_media_file_id: str = os.getenv("STATUS_MEDIA_FILE_ID", "")
     feed_media_file_id: str = os.getenv("FEED_MEDIA_FILE_ID", "")
     play_media_file_id: str = os.getenv("PLAY_MEDIA_FILE_ID", "")
@@ -30,6 +38,7 @@ class Settings:
     # Cooldowns (seconds)
     feed_cooldown: int = 15 * 60
     play_cooldown: int = 15 * 60
+    toy_cooldown: int = 15 * 60
     walk_cooldown: int = 4 * 60 * 60
     talk_cooldown: int = 10 * 60
     relax_cooldown: int = 20 * 60
