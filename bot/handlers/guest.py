@@ -62,6 +62,11 @@ _ALIASES = {
     "play": "play",
     "لعب": "play",
 
+    "toy": "toy",
+    "لعبة": "toy",
+    "العاب": "toy",
+    "ألعاب": "toy",
+
     "walk": "walk",
     "نزهة": "walk",
     "نزه": "walk",
@@ -106,6 +111,7 @@ _GUEST_HELP = (
     "حالة / status\n"
     "إطعام / feed\n"
     "لعب / play\n"
+    "لعبة / toy\n"
     "نزهة / walk\n"
     "تحدث / talk\n"
     "استلقاء / relax\n"
@@ -269,6 +275,7 @@ async def _guest_message_locked(message: Message) -> None:
                 "last_care_at": None,
                 "last_social_at": stamp,
                 "last_talk": None,
+                "last_toy": None,
                 "last_relax": None,
                 "same_action_streak": 0,
                 "partner_affinity": 0,
@@ -344,7 +351,7 @@ async def _guest_message_locked(message: Message) -> None:
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
-            if action in {"feed", "play", "walk", "talk", "relax"}:
+            if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
                 if is_sleeping(cat):
                     card = await _build_guest_card(
                         message,
@@ -394,6 +401,7 @@ async def _guest_message_locked(message: Message) -> None:
                 timestamp_key = {
                     "feed": "last_fed",
                     "play": "last_played",
+                    "toy": "last_toy",
                     "walk": "last_walk",
                     "talk": "last_talk",
                     "relax": "last_relax",
@@ -401,6 +409,7 @@ async def _guest_message_locked(message: Message) -> None:
                 cooldown = {
                     "feed": settings.feed_cooldown,
                     "play": settings.play_cooldown,
+                    "toy": settings.toy_cooldown,
                     "walk": settings.walk_cooldown,
                     "talk": settings.talk_cooldown,
                     "relax": settings.relax_cooldown,
@@ -431,6 +440,12 @@ async def _guest_message_locked(message: Message) -> None:
                         title = "😾 ملت من نفس اللعب"
                     else:
                         title = "🎾 لعبت وياها"
+                elif action == "toy":
+                    title = (
+                        "😾 ملت من كثرة الألعاب"
+                        if int(cat.get("same_action_streak", 1)) >= 4
+                        else "🧸 أعطيتها لعبة"
+                    )
                 elif action == "walk":
                     title = (
                         "😾 ملت من كثرة النزهات"
@@ -458,7 +473,7 @@ async def _guest_message_locked(message: Message) -> None:
                     balance = await get_user_points(user_id)
 
                 overused_routine = (
-                    action in {"talk", "walk"}
+                    action in {"talk", "walk", "toy"}
                     and int(cat.get("same_action_streak", 1)) >= 4
                 )
                 if overused_routine:
@@ -472,6 +487,12 @@ async def _guest_message_locked(message: Message) -> None:
                 elif bypassed:
                     description = (
                         "⚡ احتاجت الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية."
+                    )
+                elif action == "toy":
+                    description = (
+                        "🧸 اللعبة رفعت سعادتها وحبها وكسرت الملل."
+                        if int(cat.get("same_action_streak", 1)) < 4
+                        else "🌀 كثرت عليها الألعاب وبدت تمل؛ غيّر النشاط شوي."
                     )
                 elif action == "relax":
                     description = "🛋 استلقت يمك وتابعت التلفاز بهدوء."
