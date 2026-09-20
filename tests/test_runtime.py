@@ -353,6 +353,7 @@ class RuntimeTests(unittest.TestCase):
                     restored = await get_user_cat(991)
                     self.assertIsNotNone(restored)
                     self.assertEqual(restored["name"], "Protected")
+                    self.assertEqual(restored["happiness"], 88)
 
                 asyncio.run(scenario())
             finally:
