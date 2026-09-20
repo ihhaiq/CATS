@@ -138,16 +138,30 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     else:
       text = "🎾 انبسطت القطة باللعب"
   elif action == "walk":
-    text = "🌿 طلعت القطة نزهة وانبسطت"
+    if int(cat.get("same_action_streak", 1)) >= 4:
+      text = "😾 كثرت النزهات بنفس الروتين وبدت تمل"
+    else:
+      text = "🌿 طلعت القطة نزهة وانبسطت"
   elif action == "talk":
-    text = "💬 ارتاحت القطة للحچي وياك"
+    if int(cat.get("same_action_streak", 1)) >= 4:
+      text = "😾 طولت بالحچي بنفس الروتين وبدت تمل"
+    else:
+      text = "💬 ارتاحت القطة للحچي وياك"
   else:
     text = "🛋 استلقت يمك وصارت تتابع التلفاز بهدوء"
 
   points = care_reward_points(cat, action, bypassed_cooldown=bypassed)
   await update_cat(cat)
   balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
-  if soft_interaction:
+  overused_routine = (
+    action in {"talk", "walk"}
+    and int(cat.get("same_action_streak", 1)) >= 4
+  )
+  if overused_routine:
+    reward_note = (
+      "\n🌀 تكرار نفس النشاط زاد الملل؛ غيّر الروتين حتى ترجع تستمتع."
+    )
+  elif soft_interaction:
     reward_note = (
       "\n😺 التفاعل مسموح، بس التهدئة بعدها شغالة؛ تأثيره خفيف وبدون نقاط."
     )
