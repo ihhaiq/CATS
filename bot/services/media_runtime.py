@@ -18,9 +18,9 @@ from bot.services.cat_assets import (
 )
 from bot.services.local_store import (
     get_media_cache_entry,
-    get_media_file_id_sync,
+    get_media_file_id,
     get_media_override,
-    get_media_type_sync,
+    get_media_type,
     set_media_cache_entry,
 )
 
@@ -101,7 +101,7 @@ async def resolve_cat_media(
       2. local filesystem asset (with adult/legacy local fallback)
          - reuse Telegram cache when hash matches
          - lazy upload and refresh cache when missing/stale
-      3. legacy JSON file_id
+      3. legacy database file_id
       4. legacy environment file_id
     """
     visual_state = resolve_cat_visual_state(
@@ -199,7 +199,7 @@ async def resolve_cat_media(
         legacy_lookup_states.append(original_request)
 
     for legacy_state in legacy_lookup_states:
-        legacy_file_id = get_media_file_id_sync(
+        legacy_file_id = await get_media_file_id(
             legacy_state,
             breed,
             age_stage,
@@ -207,13 +207,13 @@ async def resolve_cat_media(
         if legacy_file_id:
             return ResolvedCatMedia(
                 file_id=legacy_file_id,
-                media_type=get_media_type_sync(
+                media_type=await get_media_type(
                     legacy_state,
                     breed,
                     age_stage,
                 ),
                 visual_state=visual_state,
-                source="legacy_json",
+                source="database_fallback",
             )
 
     env_file_id = _settings_fallback_id(visual_state)

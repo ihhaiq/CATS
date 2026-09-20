@@ -1,16 +1,17 @@
 """Tests for filesystem-first Catibot media resolution."""
 import asyncio
-import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from bot.services.cat_assets import (
     CAT_ASSETS_ROOT,
     get_age_stage,
     resolve_cat_visual_state,
     resolve_local_asset,
+    resolve_media_value,
 )
 
 
@@ -39,6 +40,87 @@ class FakeBot:
 
 
 class CatAssetRuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.media: dict[str, str] = {}
+        self.media_types: dict[str, str] = {}
+        self.cache: dict[str, dict] = {}
+        self.overrides: dict[str, dict] = {}
+
+        async def get_media_file_id(kind, breed=None, age_stage=None):
+            value, _ = resolve_media_value(
+                self.media,
+                kind,
+                breed,
+                age_stage,
+            )
+            return value
+
+        async def get_media_type(kind, breed=None, age_stage=None):
+            value, _ = resolve_media_value(
+                self.media_types,
+                kind,
+                breed,
+                age_stage,
+                default="photo",
+            )
+            return value or "photo"
+
+        async def get_media_cache_entry(cache_key):
+            value = self.cache.get(cache_key)
+            return dict(value) if value else None
+
+        async def set_media_cache_entry(
+            cache_key,
+            *,
+            file_id,
+            file_hash,
+            media_type,
+            path,
+        ):
+            self.cache[cache_key] = {
+                "file_id": file_id,
+                "file_hash": file_hash,
+                "media_type": media_type,
+                "path": path,
+            }
+
+        async def get_media_override(kind, breed, age_stage):
+            state = resolve_cat_visual_state(
+                {"hunger": 0},
+                kind,
+            )
+            value = self.overrides.get(f"{breed}:{age_stage}:{state}")
+            return dict(value) if value else None
+
+        self._patchers = [
+            patch(
+                "bot.services.media_runtime.get_media_file_id",
+                new=get_media_file_id,
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_type",
+                new=get_media_type,
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_cache_entry",
+                new=get_media_cache_entry,
+            ),
+            patch(
+                "bot.services.media_runtime.set_media_cache_entry",
+                new=set_media_cache_entry,
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_override",
+                new=get_media_override,
+            ),
+        ]
+        for patcher in self._patchers:
+            patcher.start()
+
+    def tearDown(self) -> None:
+        for patcher in reversed(self._patchers):
+            patcher.stop()
+
     def test_age_boundaries(self) -> None:
         self.assertEqual(get_age_stage(6), "kitten")
         self.assertEqual(get_age_stage(7), "junior")
@@ -88,13 +170,19 @@ class CatAssetRuntimeTests(unittest.TestCase):
             adult.write_bytes(b"adult")
 
             result = resolve_local_asset(
-                "siamese", "kitten", "sleep", root=root
+                "siamese",
+                "kitten",
+                "sleep",
+                root=root,
             )
             self.assertEqual(result.path, exact)
 
             exact.unlink()
             result = resolve_local_asset(
-                "siamese", "kitten", "sleep", root=root
+                "siamese",
+                "kitten",
+                "sleep",
+                root=root,
             )
             self.assertEqual(result.path, adult)
             self.assertEqual(result.age_stage, "adult")
@@ -119,24 +207,7 @@ class CatAssetRuntimeTests(unittest.TestCase):
             asset.parent.mkdir(parents=True)
             asset.write_bytes(b"version-one")
 
-            data_path = Path(directory) / "catibot.json"
-            data_path.write_text(
-                json.dumps(
-                    {
-                        "media": {
-                            "siamese:idle": "legacy-id"
-                        },
-                        "media_types": {
-                            "siamese:idle": "photo"
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            old_data = settings.json_data_file
             old_chat = settings.media_cache_chat_id
-            settings.json_data_file = str(data_path)
             settings.media_cache_chat_id = 0
             bot = FakeBot()
             cat = {
@@ -182,80 +253,54 @@ class CatAssetRuntimeTests(unittest.TestCase):
                 self.assertEqual(third.file_id, "uploaded-2")
                 self.assertEqual(bot.uploads, 2)
             finally:
-                settings.json_data_file = old_data
                 settings.media_cache_chat_id = old_chat
 
-    def test_legacy_fallback_when_local_missing(self) -> None:
-        from bot.config import settings
+    def test_database_fallback_when_local_missing(self) -> None:
         from bot.services.media_runtime import resolve_cat_media
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "assets"
             root.mkdir()
-            data_path = Path(directory) / "catibot.json"
-            data_path.write_text(
-                json.dumps(
-                    {
-                        "media": {
-                            "siamese:sleep": "legacy-sleep"
-                        },
-                        "media_types": {
-                            "siamese:sleep": "photo"
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            old_data = settings.json_data_file
-            settings.json_data_file = str(data_path)
+            self.media["siamese:sleep"] = "db-sleep"
+            self.media_types["siamese:sleep"] = "photo"
             cat = {
                 "breed": "siamese",
                 "age_days": 5,
                 "hunger": 20,
                 "sleep_until": None,
             }
-            try:
-                result = asyncio.run(
-                    resolve_cat_media(
-                        None,
-                        cat,
-                        "sleep",
-                        assets_root=root,
-                    )
+            result = asyncio.run(
+                resolve_cat_media(
+                    None,
+                    cat,
+                    "sleep",
+                    assets_root=root,
                 )
-                self.assertEqual(result.source, "legacy_json")
-                self.assertEqual(result.file_id, "legacy-sleep")
-            finally:
-                settings.json_data_file = old_data
+            )
+            self.assertEqual(result.source, "database_fallback")
+            self.assertEqual(result.file_id, "db-sleep")
 
-    def test_missing_local_without_legacy_returns_none(self) -> None:
-        from bot.config import settings
+    def test_missing_local_without_database_fallback_returns_none(self) -> None:
         from bot.services.media_runtime import resolve_cat_media
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "assets"
             root.mkdir()
-            data_path = Path(directory) / "catibot.json"
-            old_data = settings.json_data_file
-            settings.json_data_file = str(data_path)
             cat = {
                 "breed": "white",
                 "age_days": 100,
                 "hunger": 20,
                 "sleep_until": None,
             }
-            try:
-                result = asyncio.run(
-                    resolve_cat_media(
-                        None,
-                        cat,
-                        "sick",
-                        assets_root=root,
-                    )
+            result = asyncio.run(
+                resolve_cat_media(
+                    None,
+                    cat,
+                    "sick",
+                    assets_root=root,
                 )
-                self.assertIsNone(result)
-            finally:
-                settings.json_data_file = old_data
+            )
+            self.assertIsNone(result)
 
     def test_concurrent_requests_upload_once(self) -> None:
         from bot.config import settings
@@ -266,11 +311,8 @@ class CatAssetRuntimeTests(unittest.TestCase):
             asset = root / "siamese" / "adult" / "idle.png"
             asset.parent.mkdir(parents=True)
             asset.write_bytes(b"concurrent")
-            data_path = Path(directory) / "catibot.json"
 
-            old_data = settings.json_data_file
             old_chat = settings.media_cache_chat_id
-            settings.json_data_file = str(data_path)
             settings.media_cache_chat_id = 0
             bot = FakeBot()
             cat = {
@@ -302,66 +344,46 @@ class CatAssetRuntimeTests(unittest.TestCase):
                 first, second = asyncio.run(scenario())
                 self.assertEqual(bot.uploads, 1)
                 self.assertEqual(first.file_id, second.file_id)
-                self.assertIn(
+                self.assertEqual(
                     {first.source, second.source},
-                    [
-                        {"local_upload", "local_cache"},
-                        {"local_cache"},
-                    ],
+                    {"local_upload", "local_cache"},
                 )
             finally:
-                settings.json_data_file = old_data
                 settings.media_cache_chat_id = old_chat
 
     def test_literal_legacy_status_and_angry_keys_still_work(self) -> None:
-        from bot.config import settings
         from bot.services.media_runtime import resolve_cat_media
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "assets"
             root.mkdir()
-            data_path = Path(directory) / "catibot.json"
-            data_path.write_text(
-                json.dumps(
-                    {
-                        "media": {
-                            "siamese:status": "legacy-status",
-                            "siamese:cat_angry_sleep": "legacy-angry",
-                        },
-                        "media_types": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            old_data = settings.json_data_file
-            settings.json_data_file = str(data_path)
+            self.media["siamese:status"] = "legacy-status"
+            self.media["siamese:cat_angry_sleep"] = "legacy-angry"
             cat = {
                 "breed": "siamese",
                 "age_days": 30,
                 "hunger": 20,
                 "sleep_until": None,
             }
-            try:
-                status_media = asyncio.run(
-                    resolve_cat_media(
-                        None,
-                        cat,
-                        "status",
-                        assets_root=root,
-                    )
+
+            status_media = asyncio.run(
+                resolve_cat_media(
+                    None,
+                    cat,
+                    "status",
+                    assets_root=root,
                 )
-                angry_media = asyncio.run(
-                    resolve_cat_media(
-                        None,
-                        cat,
-                        "cat_angry_sleep",
-                        assets_root=root,
-                    )
+            )
+            angry_media = asyncio.run(
+                resolve_cat_media(
+                    None,
+                    cat,
+                    "cat_angry_sleep",
+                    assets_root=root,
                 )
-                self.assertEqual(status_media.file_id, "legacy-status")
-                self.assertEqual(angry_media.file_id, "legacy-angry")
-            finally:
-                settings.json_data_file = old_data
+            )
+            self.assertEqual(status_media.file_id, "legacy-status")
+            self.assertEqual(angry_media.file_id, "legacy-angry")
 
 
 if __name__ == "__main__":

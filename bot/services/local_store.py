@@ -1,34 +1,19 @@
-"""Small JSON-backed store used for local development."""
+"""PostgreSQL-backed runtime state and cat game logic."""
 import asyncio
-import json
-import logging
-import os
-import shutil
+import copy
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 from bot.config import settings
+from bot.database.db import get_session
+from bot.database.models import RuntimeState, default_runtime_state
 from bot.services.cat_assets import normalize_cat_state, resolve_media_value
 
-_lock = asyncio.Lock()
 _action_locks: dict[int, asyncio.Lock] = {}
-logger = logging.getLogger("catibot.local_store")
-
-# In-process read cache, keyed by file mtime. Every _read() used to re-parse
-# the whole JSON file from disk, even when nothing changed — the sweeps in
-# notification_sweep.py call _read() (via get_active_cats/get_cat_by_id) once
-# per active cat per cycle, which made a full-file parse happen O(cats) times
-# per sweep tick. Caching the parsed object between writes turns repeat reads
-# into an O(1) dict return. Safe as long as every mutation to a given cat's
-# dict goes through user_action_lock (the existing convention in every
-# handler and in notification_sweep.py), since that already serializes
-# concurrent writers of the same cat; this cache does not change that.
-_cache_data: dict | None = None
-_cache_mtime: float | None = None
 
 
 def user_action_lock(user_id: int) -> asyncio.Lock:
-    """Serialize stateful operations for one cat owner/user."""
+    """Serialize stateful operations for one user inside this process."""
     lock = _action_locks.get(user_id)
     if lock is None:
         lock = asyncio.Lock()
@@ -36,137 +21,41 @@ def user_action_lock(user_id: int) -> asyncio.Lock:
     return lock
 
 
-
-def _path() -> Path:
-    path = Path(settings.json_data_file)
-    if not path.is_absolute():
-        path = Path(__file__).resolve().parents[2] / path
-    return path
-
-
-def _empty_store() -> dict:
-    return {
-        "users": {},
-        "cats": [],
-        "items": [],
-        "user_inventory": [],
-        "points_log": [],
-        "media": {},
-        "media_types": {},
-        "media_cache": {},
-        "media_overrides": {},
-    }
+def _normalized_state(data: dict | None) -> dict:
+    state = copy.deepcopy(data) if isinstance(data, dict) else {}
+    for key, default in default_runtime_state().items():
+        state.setdefault(key, copy.deepcopy(default))
+    return state
 
 
-def _backup_path(path: Path) -> Path:
-    return path.with_name(path.name + ".bak")
+async def read_state() -> dict:
+    """Read the complete persisted runtime state from PostgreSQL."""
+    async with get_session() as session:
+        row = await session.get(RuntimeState, 1)
+        if row is None:
+            raise RuntimeError("PostgreSQL runtime state is not initialized")
+        return _normalized_state(row.data)
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    temp = path.with_name(path.name + ".tmp")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with temp.open("w", encoding="utf-8") as handle:
-        handle.write(text)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(temp, path)
+@asynccontextmanager
+async def state_transaction():
+    """Lock and update the single runtime-state row atomically.
 
+    Keeping the existing dictionary-shaped state preserves the current bot
+    behavior while PostgreSQL becomes the only persistence layer.
+    """
+    async with get_session() as session:
+        async with session.begin():
+            row = await session.get(RuntimeState, 1, with_for_update=True)
+            if row is None:
+                row = RuntimeState(id=1, data=default_runtime_state())
+                session.add(row)
+                await session.flush()
 
-def _load_json(path: Path) -> dict:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("JSON store root must be an object")
-    return data
-
-
-def _restore_backup(path: Path) -> dict | None:
-    backup = _backup_path(path)
-    if not backup.exists():
-        return None
-    try:
-        data = _load_json(backup)
-    except (OSError, json.JSONDecodeError, ValueError):
-        logger.exception("JSON backup is invalid: %s", backup)
-        return None
-
-    _atomic_write_text(
-        path,
-        json.dumps(data, ensure_ascii=False, indent=2),
-    )
-    logger.warning("Restored JSON store from backup: %s", backup)
-    return data
-
-
-def _read() -> dict:
-    global _cache_data, _cache_mtime
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not path.exists():
-        data = _restore_backup(path)
-        if data is None:
-            data = _empty_store()
-            _cache_data, _cache_mtime = data, None
-            return data
-    else:
-        try:
-            mtime = path.stat().st_mtime
-        except OSError:
-            mtime = None
-        if _cache_data is not None and mtime is not None and mtime == _cache_mtime:
-            return _cache_data
-        try:
-            data = _load_json(path)
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
-            logger.error("Primary JSON store is unreadable: %s", exc)
-            data = _restore_backup(path)
-            if data is None:
-                raise RuntimeError(
-                    "Cat data store is damaged and no valid backup is available; "
-                    "refusing to start with an empty store."
-                ) from exc
-
-    for key, default in _empty_store().items():
-        data.setdefault(key, default)
-    try:
-        _cache_mtime = path.stat().st_mtime
-    except OSError:
-        _cache_mtime = None
-    _cache_data = data
-    return data
-
-
-def _write(data: dict) -> None:
-    path = _path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    backup = _backup_path(path)
-
-    if path.exists():
-        try:
-            _load_json(path)
-        except (OSError, json.JSONDecodeError, ValueError):
-            logger.error(
-                "Refusing to replace backup with an invalid primary JSON store: %s",
-                path,
-            )
-        else:
-            shutil.copy2(path, backup)
-
-    _atomic_write_text(
-        path,
-        json.dumps(data, ensure_ascii=False, indent=2),
-    )
-    # Keep the backup at the same successfully written state. Atomic replace
-    # protects the primary from partial writes; the copy protects restarts
-    # from later corruption or accidental primary-file loss.
-    shutil.copy2(path, backup)
-
-    global _cache_data, _cache_mtime
-    _cache_data = data
-    try:
-        _cache_mtime = path.stat().st_mtime
-    except OSError:
-        _cache_mtime = None
+            data = _normalized_state(row.data)
+            yield data
+            row.data = copy.deepcopy(data)
+            row.updated_at = datetime.utcnow()
 
 
 def now_iso() -> str:
@@ -1215,35 +1104,28 @@ def notification_gap_seconds(needs: list[str]) -> int:
     return settings.notification_min_gap
 
 
+def _new_user(user_id: int) -> dict:
+    return {
+        "user_id": user_id,
+        "points": 100,
+        "purchases": [],
+        "created_at": now_iso(),
+    }
+
+
 async def ensure_user(user_id: int) -> dict:
-    async with _lock:
-        data = _read()
-        user = data["users"].setdefault(str(user_id), {
-            "user_id": user_id,
-            "points": 100,
-            "purchases": [],
-            "created_at": now_iso(),
-        })
+    async with state_transaction() as data:
+        user = data["users"].setdefault(str(user_id), _new_user(user_id))
         user.setdefault("purchases", [])
-        _write(data)
-        return user
+        return copy.deepcopy(user)
 
 
 async def claim_daily_bonus(user_id: int) -> tuple[int, int] | None:
-    """Once-per-UTC-day visit bonus. Streak grows on consecutive days and
-    resets after a gap, rewarding people for coming back regularly (not for
-    grinding a single session). Returns (bonus_points, streak) the first time
-    it's claimed each day, or None if today's bonus was already claimed.
-    Call this once per user-facing interaction (e.g. right after
-    ensure_user), not on every internal helper call."""
-    async with _lock:
-        data = _read()
-        user = data["users"].setdefault(str(user_id), {
-            "user_id": user_id,
-            "points": 100,
-            "purchases": [],
-            "created_at": now_iso(),
-        })
+    """Claim the once-per-UTC-day visit bonus."""
+    async with state_transaction() as data:
+        user = data["users"].setdefault(str(user_id), _new_user(user_id))
+        user.setdefault("purchases", [])
+
         today = date.today().isoformat()
         last_claim = user.get("last_daily_claim")
         if last_claim == today:
@@ -1252,36 +1134,42 @@ async def claim_daily_bonus(user_id: int) -> tuple[int, int] | None:
         gap_days = None
         if last_claim:
             try:
-                gap_days = (date.fromisoformat(today) - date.fromisoformat(last_claim)).days
+                gap_days = (
+                    date.fromisoformat(today) - date.fromisoformat(last_claim)
+                ).days
             except ValueError:
                 gap_days = None
-        streak = int(user.get("daily_streak", 0)) + 1 if gap_days == 1 else 1
+
+        streak = (
+            int(user.get("daily_streak", 0)) + 1
+            if gap_days == 1
+            else 1
+        )
         bonus = min(30, 5 + (streak - 1) * 2)
 
         user["points"] = int(user.get("points", 100)) + bonus
         user["daily_streak"] = streak
         user["last_daily_claim"] = today
-        data.setdefault("points_log", []).append({
-            "user_id": user_id,
-            "delta": bonus,
-            "reason": "daily_visit",
-            "ts": now_iso(),
-        })
-        _write(data)
+        data["points_log"].append(
+            {
+                "user_id": user_id,
+                "delta": bonus,
+                "reason": "daily_visit",
+                "ts": now_iso(),
+            }
+        )
         return bonus, streak
 
 
 async def get_user_points(user_id: int) -> int:
     user = await ensure_user(user_id)
-    return user["points"]
+    return int(user["points"])
 
 
 async def clear_purchases(user_id: int) -> None:
-    async with _lock:
-        data = _read()
-        user = data["users"].setdefault(str(user_id), {"user_id": user_id, "points": 100, "purchases": [], "created_at": now_iso()})
+    async with state_transaction() as data:
+        user = data["users"].setdefault(str(user_id), _new_user(user_id))
         user["purchases"] = []
-        _write(data)
 
 
 async def get_purchases(user_id: int) -> list[str]:
@@ -1290,9 +1178,17 @@ async def get_purchases(user_id: int) -> list[str]:
 
 
 async def get_user_cat(user_id: int) -> dict | None:
-    async with _lock:
-        data = _read()
-        return next((cat for cat in data["cats"] if cat["owner_id"] == user_id and not cat["is_fled"]), None)
+    data = await read_state()
+    cat = next(
+        (
+            item
+            for item in data["cats"]
+            if int(item.get("owner_id", 0)) == int(user_id)
+            and not item.get("is_fled")
+        ),
+        None,
+    )
+    return copy.deepcopy(cat) if cat is not None else None
 
 
 async def get_cat_by_id(
@@ -1300,17 +1196,17 @@ async def get_cat_by_id(
     *,
     include_fled: bool = False,
 ) -> dict | None:
-    async with _lock:
-        data = _read()
-        return next(
-            (
-                cat
-                for cat in data["cats"]
-                if int(cat.get("cat_id", 0)) == int(cat_id)
-                and (include_fled or not cat.get("is_fled"))
-            ),
-            None,
-        )
+    data = await read_state()
+    cat = next(
+        (
+            item
+            for item in data["cats"]
+            if int(item.get("cat_id", 0)) == int(cat_id)
+            and (include_fled or not item.get("is_fled"))
+        ),
+        None,
+    )
+    return copy.deepcopy(cat) if cat is not None else None
 
 
 async def get_latest_cat_for_user(
@@ -1318,57 +1214,64 @@ async def get_latest_cat_for_user(
     *,
     include_fled: bool = True,
 ) -> dict | None:
-    async with _lock:
-        cats = [
-            cat
-            for cat in _read()["cats"]
-            if int(cat.get("owner_id", 0)) == int(user_id)
-            and (include_fled or not cat.get("is_fled"))
-        ]
-        return max(cats, key=lambda cat: int(cat.get("cat_id", 0))) if cats else None
+    data = await read_state()
+    cats = [
+        item
+        for item in data["cats"]
+        if int(item.get("owner_id", 0)) == int(user_id)
+        and (include_fled or not item.get("is_fled"))
+    ]
+    if not cats:
+        return None
+    return copy.deepcopy(
+        max(cats, key=lambda item: int(item.get("cat_id", 0)))
+    )
 
 
 async def get_active_cats() -> list[dict]:
-    async with _lock:
-        return [cat for cat in _read()["cats"] if not cat.get("is_fled")]
+    data = await read_state()
+    return [
+        copy.deepcopy(item)
+        for item in data["cats"]
+        if not item.get("is_fled")
+    ]
 
 
 async def create_cat(cat: dict) -> dict:
-    async with _lock:
-        data = _read()
-        cat["cat_id"] = max((item.get("cat_id", 0) for item in data["cats"]), default=0) + 1
-        data["cats"].append(cat)
-        _write(data)
-        return cat
+    async with state_transaction() as data:
+        cat["cat_id"] = (
+            max(
+                (int(item.get("cat_id", 0)) for item in data["cats"]),
+                default=0,
+            )
+            + 1
+        )
+        data["cats"].append(copy.deepcopy(cat))
+        return copy.deepcopy(cat)
 
 
 async def update_cat(cat: dict) -> None:
-    async with _lock:
-        data = _read()
+    async with state_transaction() as data:
         for index, saved in enumerate(data["cats"]):
-            if saved["cat_id"] == cat["cat_id"]:
-                data["cats"][index] = cat
-                _write(data)
+            if int(saved.get("cat_id", 0)) == int(cat["cat_id"]):
+                data["cats"][index] = copy.deepcopy(cat)
                 return
+        raise KeyError(f"cat_id={cat.get('cat_id')} does not exist")
 
 
 async def award_points(user_id: int, delta: int, reason: str) -> int:
-    async with _lock:
-        data = _read()
-        user = data["users"].setdefault(str(user_id), {
-            "user_id": user_id,
-            "points": 100,
-            "created_at": now_iso(),
-        })
-        user["points"] += delta
-        data["points_log"].append({
-            "user_id": user_id,
-            "delta": delta,
-            "reason": reason,
-            "ts": now_iso(),
-        })
-        _write(data)
-        return user["points"]
+    async with state_transaction() as data:
+        user = data["users"].setdefault(str(user_id), _new_user(user_id))
+        user["points"] = int(user.get("points", 100)) + int(delta)
+        data["points_log"].append(
+            {
+                "user_id": user_id,
+                "delta": int(delta),
+                "reason": reason,
+                "ts": now_iso(),
+            }
+        )
+        return int(user["points"])
 
 
 async def get_media_file_id(
@@ -1376,23 +1279,9 @@ async def get_media_file_id(
     breed: str | None = None,
     age_stage: str | None = None,
 ) -> str:
-    async with _lock:
-        value, _ = resolve_media_value(
-            _read().get("media", {}),
-            kind,
-            breed,
-            age_stage,
-        )
-        return value
-
-
-def get_media_file_id_sync(
-    kind: str,
-    breed: str | None = None,
-    age_stage: str | None = None,
-) -> str:
+    data = await read_state()
     value, _ = resolve_media_value(
-        _read().get("media", {}),
+        data.get("media", {}),
         kind,
         breed,
         age_stage,
@@ -1400,13 +1289,14 @@ def get_media_file_id_sync(
     return value
 
 
-def get_media_type_sync(
+async def get_media_type(
     kind: str,
     breed: str | None = None,
     age_stage: str | None = None,
 ) -> str:
+    data = await read_state()
     value, _ = resolve_media_value(
-        _read().get("media_types", {}),
+        data.get("media_types", {}),
         kind,
         breed,
         age_stage,
@@ -1421,8 +1311,7 @@ async def set_media_file_id(
     breed: str | None = None,
     age_stage: str | None = None,
 ) -> None:
-    async with _lock:
-        data = _read()
+    async with state_transaction() as data:
         state = normalize_cat_state(kind)
         if breed and age_stage:
             key = f"{breed}:{age_stage}:{state}"
@@ -1430,8 +1319,7 @@ async def set_media_file_id(
             key = f"{breed}:{kind}"
         else:
             key = kind
-        data.setdefault("media", {})[key] = file_id
-        _write(data)
+        data["media"][key] = file_id
 
 
 async def set_media_file(
@@ -1441,27 +1329,22 @@ async def set_media_file(
     breed: str | None = None,
     age_stage: str | None = None,
 ) -> None:
-    async with _lock:
-        data = _read()
+    async with state_transaction() as data:
         state = normalize_cat_state(kind)
         if breed and age_stage:
             key = f"{breed}:{age_stage}:{state}"
         elif breed:
-            # Keep the two-part write contract for old callers and JSON data.
             key = f"{breed}:{kind}"
         else:
             key = kind
-        data.setdefault("media", {})[key] = file_id
-        data.setdefault("media_types", {})[key] = media_type
-        _write(data)
-
+        data["media"][key] = file_id
+        data["media_types"][key] = media_type
 
 
 async def get_media_cache_entry(cache_key: str) -> dict | None:
-    """Return cached Telegram metadata for one local asset."""
-    async with _lock:
-        entry = _read().get("media_cache", {}).get(cache_key)
-        return dict(entry) if isinstance(entry, dict) else None
+    data = await read_state()
+    entry = data.get("media_cache", {}).get(cache_key)
+    return copy.deepcopy(entry) if isinstance(entry, dict) else None
 
 
 async def set_media_cache_entry(
@@ -1472,17 +1355,14 @@ async def set_media_cache_entry(
     media_type: str,
     path: str,
 ) -> None:
-    """Persist metadata only; asset bytes stay on the filesystem."""
-    async with _lock:
-        data = _read()
-        data.setdefault("media_cache", {})[cache_key] = {
+    async with state_transaction() as data:
+        data["media_cache"][cache_key] = {
             "file_id": file_id,
             "file_hash": file_hash,
             "media_type": media_type,
             "path": path,
             "updated_at": now_iso(),
         }
-        _write(data)
 
 
 async def get_media_override(
@@ -1490,17 +1370,15 @@ async def get_media_override(
     breed: str,
     age_stage: str,
 ) -> dict | None:
-    """Return only an exact explicit /dev override for this asset identity."""
-    async with _lock:
-        overrides = _read().get("media_overrides", {})
-        state = normalize_cat_state(kind)
-        key = f"{breed}:{age_stage}:{state}"
-        value = overrides.get(key)
-        if isinstance(value, dict) and value.get("file_id"):
-            result = dict(value)
-            result["key"] = key
-            return result
-        return None
+    data = await read_state()
+    state = normalize_cat_state(kind)
+    key = f"{breed}:{age_stage}:{state}"
+    value = data.get("media_overrides", {}).get(key)
+    if isinstance(value, dict) and value.get("file_id"):
+        result = copy.deepcopy(value)
+        result["key"] = key
+        return result
+    return None
 
 
 async def set_media_override(
@@ -1511,14 +1389,11 @@ async def set_media_override(
     breed: str,
     age_stage: str,
 ) -> None:
-    """Store an explicit admin override separately from automatic local cache."""
-    async with _lock:
-        data = _read()
+    async with state_transaction() as data:
         state = normalize_cat_state(kind)
         key = f"{breed}:{age_stage}:{state}"
-        data.setdefault("media_overrides", {})[key] = {
+        data["media_overrides"][key] = {
             "file_id": file_id,
             "media_type": media_type,
             "updated_at": now_iso(),
         }
-        _write(data)

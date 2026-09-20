@@ -1,97 +1,58 @@
 # AGENT.md — Catibot runtime notes
 
-## Current runtime
+## Storage contract
 
-Catibot has one active runtime path:
+PostgreSQL is the only runtime persistence backend.
 
-- `bot/main.py` boots aiogram.
+- `STORAGE_BACKEND=postgres` is required.
+- `DATABASE_URL` is required.
+- Do not add a JSON/SQLite/file fallback.
+- A database failure must fail startup rather than start with empty state.
+- All mutable game state belongs in PostgreSQL.
+
+The current schema stores the complete dictionary-shaped runtime state in the
+`catibot_runtime_state` JSONB row. This intentionally preserves the existing
+game behavior while eliminating JSON files. Mutations use a PostgreSQL row lock,
+so multiple processes do not overwrite each other during read-modify-write
+operations.
+
+A one-time legacy importer may read an existing `catibot.json` only to migrate
+it into PostgreSQL. After successful import, the legacy file is removed. It is
+not a fallback backend.
+
+## Active runtime
+
+- `bot/main.py` boots aiogram and PostgreSQL.
 - `bot/handlers/__init__.py` is the router registry.
-- Active gameplay state lives in `bot/services/local_store.py`.
-- Rich cards and media resolution live in `rich_card.py`,
-  `media_runtime.py`, and `cat_assets.py`.
-- Periodic needs/wake notifications live in `notification_sweep.py`.
+- `bot/services/local_store.py` contains the active game logic and PostgreSQL
+  state access. The filename is retained to avoid a broad import-only rename.
+- `rich_card.py`, `media_runtime.py`, and `cat_assets.py` handle the Rich
+  UI and cat assets.
+- `notification_sweep.py` handles wake/needs notifications.
 
-Do not reintroduce a second domain/service/repository stack beside this path.
-Shared logic should be added to the active services and reused by private,
-Guest Mode, and callback handlers.
+Do not introduce a second repository/domain stack beside this path.
 
-## Storage
+## Assets
 
-The live gameplay repository is currently JSON-backed.
-
-Railway PostgreSQL support is intentionally retained:
-
-- `bot/database/db.py`
-- `bot/database/models.py`
-- `SQLAlchemy`
-- `asyncpg`
-- `alembic`
-
-`DATABASE_URL` may stay configured in Railway. The existing SQL bootstrap can
-create the schema when `STORAGE_BACKEND=postgres`, but current feature
-handlers still read/write through `local_store.py`. Until that migration is
-completed, keep the JSON file on a persistent Railway Volume too.
-
-When migrating to PostgreSQL, replace the persistence layer behind the active
-runtime instead of restoring the deleted legacy `bot/storage`, `bot/domain`,
-or `CatService` stack.
-
-## Official cat assets
-
-The source of truth is:
+Official PNG assets remain under:
 
 ```text
 bot/assets/cats/<breed>/<age_stage>/<state>.png
 ```
 
-Age stage is derived from `age_days`.
-
-Supported breeds:
-
-- `orange_tabby`
-- `black`
-- `siamese`
-- `british_shorthair_grey`
-- `calico`
-- `white`
-
-Supported age stages:
-
-- `kitten`: 0-6 days
-- `junior`: 7-20 days
-- `adult`: 21-89 days
-- `senior`: 90+ days
-
-Supported states:
-
-- `idle`
-- `happy`
-- `hungry`
-- `feed`
-- `play`
-- `walk`
-- `talk`
-- `sleep`
-- `angry`
-- `sick`
-
-Keep breed/state vocabulary centralized in `bot/services/cat_assets.py`.
-Official files are uploaded lazily to Telegram and cached by content hash.
-Do not store image bytes or base64 in the data store.
+Asset files are code/deployment resources, not persistence. Telegram media IDs,
+cache metadata, and admin overrides are persisted in PostgreSQL.
 
 ## Development rules
 
-- Keep private, Guest Mode, and rich callback behavior on the same game logic.
+- Keep private, Guest Mode, and callback behavior on the same game logic.
 - Do not duplicate decay/cooldown/needs calculations inside handlers.
-- Preserve atomic JSON writes and backup recovery until PostgreSQL owns the
-  gameplay state.
-- Do not remove PostgreSQL dependencies while the Railway database is part of
-  the deployment.
-- New files need a concrete runtime purpose; avoid placeholder modules.
+- Use `state_transaction()` for read-modify-write operations.
+- Do not write runtime JSON files.
+- New persistent fields should be added to the runtime state without creating
+  a second source of truth.
 
 ## Checks
-
-Run before merging:
 
 ```bash
 python -m compileall -q bot

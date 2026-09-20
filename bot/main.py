@@ -9,7 +9,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.config import settings, validate_settings
-from bot.database.db import init_db
+from bot.database.db import close_db, init_db
 from bot.handlers import all_routers
 from bot.services.notification_sweep import start_notification_sweep
 
@@ -25,11 +25,16 @@ async def on_startup(bot: Bot) -> None:
     logger.info("catibot started")
 
 
+async def on_shutdown() -> None:
+    await close_db()
+
+
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
     for router in all_routers:
         dp.include_router(router)
     dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
     return dp
 
 
