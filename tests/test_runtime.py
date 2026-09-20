@@ -69,7 +69,10 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("الراحة", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
-        self.assertIn("الشبع", card.html)
+        self.assertIn("cat:relax", card.html)
+        self.assertIn("ملاحظة", card.html)
+        self.assertIn("الشبع: 100 = شبعانة جدًا", card.html)
+        self.assertIn("الملل: 0 = مرتاحة وغير مَلّانة", card.html)
         self.assertNotIn("الجوع:", card.html)
 
     def test_rich_card_binds_controls_to_cat_id(self) -> None:
@@ -115,6 +118,55 @@ class RuntimeTests(unittest.TestCase):
         card = asyncio.run(build_rich_card(None, cat, 0))
         self.assertIn("&lt;b&gt;Test&lt;/b&gt;", card.html)
         self.assertNotIn("<h2><b>Test</b></h2>", card.html)
+
+    def test_state_note_describes_hunger_and_boredom(self) -> None:
+        from datetime import datetime
+
+        cat = {
+            "name": "Mood",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "222222",
+            "hunger": 60,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 90,
+            "rest_level": 100,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "last_relax": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("ملل قاتل", card.html)
+        self.assertIn("جائعة شوي", card.html)
+
+    def test_update_button_is_separate_and_colored(self) -> None:
+        cat = {
+            "name": "UI",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "333333",
+            "hunger": 20,
+            "happiness": 90,
+            "love_bar": 100,
+            "trust": 60,
+            "boredom": 10,
+            "rest_level": 100,
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "last_relax": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn('style="success" data="cat:status">🔄 تحديث', card.html)
+        self.assertIn("🛋 استلقاء", card.html)
 
     def test_lightning_only_marks_live_cooldown_bypass(self) -> None:
         from datetime import datetime
