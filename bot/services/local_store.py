@@ -785,6 +785,9 @@ def apply_care_effects(cat: dict, action: str) -> None:
     if action in {"play", "walk"}:
         cat["last_social_at"] = moment.isoformat()
 
+    if action in {"talk", "walk"} and streak >= 4:
+        meaningful = False
+
     trust_gain = {
         "feed": 2,
         "play": 2,
@@ -916,7 +919,10 @@ def care_reward_points(
     """Same reward on every surface; need-rescue bypasses never farm points."""
     if bypassed_cooldown or not bool(cat.get("last_care_meaningful", False)):
         return 0
-    if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
+    streak = int(cat.get("same_action_streak", 1))
+    if action == "play" and streak >= 5:
+        return 0
+    if action in {"talk", "walk"} and streak >= 4:
         return 0
     return {
         "feed": 5,
