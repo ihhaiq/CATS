@@ -104,11 +104,19 @@ current user/chat and deletes the transport message best-effort.
 
 ## Railway
 
-Set `BOT_TOKEN`, `STORAGE_BACKEND`, `DATABASE_URL`, `WEBHOOK_BASE_URL`, and
-`ADMIN_IDS` in Railway. The current feature handlers use the JSON repository;
-keep `STORAGE_BACKEND=json` until the repository migration to PostgreSQL is
-completed. Do not deploy the database mode expecting the Rich handlers to use
-PostgreSQL yet.
+Set `BOT_TOKEN`, `STORAGE_BACKEND`, `WEBHOOK_BASE_URL`, and `ADMIN_IDS` in
+Railway. The current feature handlers use the JSON repository, so keep
+`STORAGE_BACKEND=json` until the repository migration to PostgreSQL is
+completed.
+
+Attach a persistent Railway Volume to the service. When
+`RAILWAY_VOLUME_MOUNT_PATH` is available and `JSON_DATA_FILE` is unset or
+left at `data/catibot.json`, Catibot stores its state at
+`$RAILWAY_VOLUME_MOUNT_PATH/catibot.json`. JSON writes are atomic, the previous
+valid state is kept as `catibot.json.bak`, and a missing or damaged primary
+file is restored from that backup instead of silently starting from an empty
+store. Without a persistent Volume, a new Railway deployment can still lose
+container-local files.
 
 ## Checks
 
