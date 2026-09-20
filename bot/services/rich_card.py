@@ -190,8 +190,14 @@ async def build_rich_card(
             note_labels[item]
             for item in note_priority
             if item in needs and item in note_labels
-        ][:2]
-        note_text = "، و".join(note_items) if note_items else "مرتاحـة وما تحتاج شي هسه"
+        ]
+        if 50 < sleep_need <= 75:
+            note_items.append("تحتاج استراحة بسيطة")
+        note_text = (
+            "، و".join(note_items[:2])
+            if note_items
+            else "مرتاحـة وما تحتاج شي هسه"
+        )
     note_cell = html.escape(note_text)
     action_labels = {
         "feed": "🍖 إطعام",
