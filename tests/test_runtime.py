@@ -1,8 +1,8 @@
-"""Offline checks for the checked-in JSON and Rich Message runtime."""
+"""Offline checks for the PostgreSQL/Rich Message runtime."""
 import asyncio
-import json
 import tempfile
 import unittest
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 from bot.services.cat_assets import (
@@ -15,6 +15,36 @@ from bot.services.rich_card import build_rich_card
 
 
 class RuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._media_patchers = [
+            patch(
+                "bot.services.media_runtime.get_media_override",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_cache_entry",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "bot.services.media_runtime.set_media_cache_entry",
+                new=AsyncMock(),
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_file_id",
+                new=AsyncMock(return_value=""),
+            ),
+            patch(
+                "bot.services.media_runtime.get_media_type",
+                new=AsyncMock(return_value="photo"),
+            ),
+        ]
+        for patcher in self._media_patchers:
+            patcher.start()
+
+    def tearDown(self) -> None:
+        for patcher in reversed(self._media_patchers):
+            patcher.stop()
+
     def test_get_age_stage_boundaries(self) -> None:
         self.assertEqual(get_age_stage(0), "kitten")
         self.assertEqual(get_age_stage(6), "kitten")
@@ -276,168 +306,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("cat:walk", card.html)
         self.assertNotIn("cat:talk", card.html)
 
-    def test_local_store_creates_and_updates_json(self) -> None:
-        from bot.config import settings
-        from bot.services.local_store import create_cat, get_user_cat, now_iso, update_cat
+    def test_postgres_runtime_state_sections(self) -> None:
+        from bot.database.models import default_runtime_state
 
-        with tempfile.TemporaryDirectory() as directory:
-            previous = settings.json_data_file
-            settings.json_data_file = str(Path(directory) / "catibot.json")
-            try:
-                async def scenario() -> None:
-                    stamp = now_iso()
-                    cat = {
-                        "owner_id": 777,
-                        "name": "Test",
-                        "breed": "black",
-                        "age_days": 30,
-                        "id_number": "777777",
-                        "hunger": 20,
-                        "happiness": 90,
-                        "love_bar": 100,
-                        "is_fled": False,
-                        "last_fed": stamp,
-                        "last_played": stamp,
-                        "last_walk": stamp,
-                        "last_decay_at": stamp,
-                    }
-                    await create_cat(cat)
-                    saved = await get_user_cat(777)
-                    self.assertIsNotNone(saved)
-                    saved["happiness"] = 80
-                    await update_cat(saved)
-                    self.assertEqual((await get_user_cat(777))["happiness"], 80)
-
-                asyncio.run(scenario())
-            finally:
-                settings.json_data_file = previous
-
-    def test_json_backup_restores_cat_after_primary_corruption(self) -> None:
-        from bot.config import settings
-        from bot.services.local_store import create_cat, get_user_cat, now_iso, update_cat
-
-        with tempfile.TemporaryDirectory() as directory:
-            previous = settings.json_data_file
-            data_path = Path(directory) / "catibot.json"
-            settings.json_data_file = str(data_path)
-            try:
-                async def scenario() -> None:
-                    stamp = now_iso()
-                    cat = {
-                        "owner_id": 991,
-                        "name": "Protected",
-                        "breed": "black",
-                        "age_days": 30,
-                        "id_number": "991991",
-                        "hunger": 20,
-                        "happiness": 90,
-                        "love_bar": 100,
-                        "trust": 60,
-                        "boredom": 10,
-                        "is_fled": False,
-                        "last_fed": stamp,
-                        "last_played": None,
-                        "last_toy": None,
-                        "last_walk": None,
-                        "last_talk": None,
-                        "last_relax": None,
-                        "last_decay_at": stamp,
-                    }
-                    await create_cat(cat)
-                    cat["happiness"] = 88
-                    await update_cat(cat)
-
-                    self.assertTrue(Path(str(data_path) + ".bak").exists())
-                    data_path.write_text("{broken", encoding="utf-8")
-
-                    restored = await get_user_cat(991)
-                    self.assertIsNotNone(restored)
-                    self.assertEqual(restored["name"], "Protected")
-                    self.assertEqual(restored["happiness"], 88)
-
-                asyncio.run(scenario())
-            finally:
-                settings.json_data_file = previous
-
-    def test_media_lookup_fallback_chain_and_missing(self) -> None:
-        from bot.config import settings
-        from bot.services.local_store import get_media_file_id_sync
-
-        with tempfile.TemporaryDirectory() as directory:
-            previous = settings.json_data_file
-            data_path = Path(directory) / "catibot.json"
-            settings.json_data_file = str(data_path)
-            data_path.write_text(
-                json.dumps(
-                    {
-                        "media": {
-                            "siamese:kitten:sleep": "exact",
-                            "black:adult:sleep": "adult-fallback",
-                            "calico:sleep": "legacy-fallback",
-                            "hungry": "generic-fallback",
-                            "siamese:kitten:idle": "idle-canonical",
-                            "siamese:kitten:angry": "angry-canonical",
-                        },
-                        "media_types": {},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            try:
-                self.assertEqual(
-                    get_media_file_id_sync("sleep", "siamese", "kitten"),
-                    "exact",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("sleep", "black", "kitten"),
-                    "adult-fallback",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("sleep", "calico", "kitten"),
-                    "legacy-fallback",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("hungry", "white", "kitten"),
-                    "generic-fallback",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("status", "siamese", "kitten"),
-                    "idle-canonical",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("cat_angry_sleep", "siamese", "kitten"),
-                    "angry-canonical",
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("sick", "white", "senior"),
-                    "",
-                )
-            finally:
-                settings.json_data_file = previous
-
-    def test_set_media_file_writes_three_part_key(self) -> None:
-        from bot.config import settings
-        from bot.services.local_store import get_media_file_id_sync, set_media_file
-
-        with tempfile.TemporaryDirectory() as directory:
-            previous = settings.json_data_file
-            settings.json_data_file = str(Path(directory) / "catibot.json")
-            try:
-                asyncio.run(
-                    set_media_file(
-                        "sleep",
-                        "file-123",
-                        "photo",
-                        breed="white",
-                        age_stage="senior",
-                    )
-                )
-                self.assertEqual(
-                    get_media_file_id_sync("sleep", "white", "senior"),
-                    "file-123",
-                )
-            finally:
-                settings.json_data_file = previous
+        state = default_runtime_state()
+        self.assertEqual(
+            set(state),
+            {
+                "users",
+                "cats",
+                "items",
+                "user_inventory",
+                "points_log",
+                "media",
+                "media_types",
+                "media_cache",
+                "media_overrides",
+            },
+        )
+        self.assertEqual(state["users"], {})
+        self.assertEqual(state["cats"], [])
 
     def test_asset_library_audit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

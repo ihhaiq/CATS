@@ -1,7 +1,4 @@
-"""
-Entry point. Boots the aiogram dispatcher on a webhook (aiohttp) for Railway.
-TODO (AGENT.md step 2): wire this up for real once handlers/database are implemented.
-"""
+"""Catibot application entry point."""
 import asyncio
 import logging
 
@@ -12,7 +9,7 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 
 from bot.config import settings, validate_settings
-from bot.database.db import init_db
+from bot.database.db import close_db, init_db
 from bot.handlers import all_routers
 from bot.services.notification_sweep import start_notification_sweep
 
@@ -24,8 +21,12 @@ async def on_startup(bot: Bot) -> None:
     await init_db()
     if settings.webhook_base_url:
         await bot.set_webhook(settings.webhook_base_url + settings.webhook_path)
-    start_notification_sweep(bot)  # background periodic task, see services/notification_sweep.py
+    start_notification_sweep(bot)
     logger.info("catibot started")
+
+
+async def on_shutdown() -> None:
+    await close_db()
 
 
 def build_dispatcher() -> Dispatcher:
@@ -33,6 +34,7 @@ def build_dispatcher() -> Dispatcher:
     for router in all_routers:
         dp.include_router(router)
     dp.startup.register(on_startup)
+    dp.shutdown.register(on_shutdown)
     return dp
 
 
@@ -46,11 +48,13 @@ def main() -> None:
 
     if settings.webhook_base_url:
         app = web.Application()
-        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=settings.webhook_path)
+        SimpleRequestHandler(dispatcher=dp, bot=bot).register(
+            app,
+            path=settings.webhook_path,
+        )
         setup_application(app, dp, bot=bot)
         web.run_app(app, port=settings.port)
     else:
-        # local dev fallback: long polling
         asyncio.run(dp.start_polling(bot))
 
 
