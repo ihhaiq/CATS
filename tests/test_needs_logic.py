@@ -7,6 +7,7 @@ from bot.services.local_store import (
     action_block_reason,
     apply_care_effects,
     apply_decay,
+    apply_light_interaction,
     can_bypass_action_cooldown,
     care_reward_points,
     collect_needs,
@@ -84,7 +85,7 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertGreater(cat["happiness"], happiness_before)
         self.assertGreaterEqual(cat["love_bar"], love_before)
         self.assertGreaterEqual(cat["trust"], trust_before)
-        self.assertEqual(cat["boredom"], boredom_before)
+        self.assertLess(cat["boredom"], boredom_before)
         self.assertEqual(sleep_need_percent(cat), rest_before)
 
     def test_play_and_walk_cost_energy(self) -> None:
@@ -122,12 +123,25 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertGreater(after, before)
         self.assertLess(after - before, 25)
 
-    def test_repetitive_routine_adds_boredom(self) -> None:
+    def test_repeated_talk_eventually_adds_boredom(self) -> None:
         cat = old_cat(0)
-        cat["boredom"] = 20
-        for _ in range(5):
-            apply_care_effects(cat, "feed")
-        self.assertGreater(cat["boredom"], 20)
+        cat["boredom"] = 40
+        for _ in range(3):
+            apply_care_effects(cat, "talk")
+        before_overuse = cat["boredom"]
+        apply_care_effects(cat, "talk")
+        apply_care_effects(cat, "talk")
+        self.assertGreater(cat["boredom"], before_overuse)
+
+    def test_repeated_walk_eventually_adds_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 40
+        for _ in range(3):
+            apply_care_effects(cat, "walk")
+        before_overuse = cat["boredom"]
+        apply_care_effects(cat, "walk")
+        apply_care_effects(cat, "walk")
+        self.assertGreater(cat["boredom"], before_overuse)
 
     def test_repeated_play_eventually_causes_boredom(self) -> None:
         cat = old_cat(0)
@@ -140,9 +154,82 @@ class CoupledNeedsTests(unittest.TestCase):
             if index == 3:
                 previous = cat["boredom"]
         self.assertGreater(cat["boredom"], previous)
-        self.assertEqual(action_block_reason(cat, "play"), "bored_of_play")
+        self.assertIsNone(action_block_reason(cat, "play"))
         self.assertFalse(can_bypass_action_cooldown(cat, "play"))
         self.assertEqual(recommended_action(cat), "talk")
+
+    def test_soft_cooldown_interaction_does_not_farm_stats(self) -> None:
+        cat = old_cat(0)
+        cat["happiness"] = 80
+        cat["love_bar"] = 70
+        cat["boredom"] = 20
+        before = (
+            cat["happiness"],
+            cat["love_bar"],
+            cat["boredom"],
+            cat["hunger"],
+        )
+        apply_light_interaction(cat, "talk")
+        self.assertEqual(
+            before,
+            (
+                cat["happiness"],
+                cat["love_bar"],
+                cat["boredom"],
+                cat["hunger"],
+            ),
+        )
+        self.assertFalse(cat["last_care_meaningful"])
+
+    def test_repeated_soft_talk_and_walk_can_add_boredom(self) -> None:
+        for action in ("talk", "walk"):
+            cat = old_cat(0)
+            cat["boredom"] = 20
+            for _ in range(5):
+                apply_light_interaction(cat, action)
+            self.assertGreater(cat["boredom"], 20)
+
+    def test_relax_is_a_gentle_resting_interaction(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 60
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        cat["boredom"] = 30
+        rest_before = sleep_need_percent(cat)
+        boredom_before = cat["boredom"]
+        apply_care_effects(cat, "relax")
+        self.assertGreater(sleep_need_percent(cat), rest_before)
+        self.assertLess(cat["boredom"], boredom_before)
+
+    def test_frequent_refreshes_do_not_freeze_boredom(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 0
+        cat["last_social_at"] = datetime.utcnow().isoformat()
+        for _ in range(12):
+            cat["last_decay_at"] = (
+                datetime.utcnow() - timedelta(minutes=5)
+            ).isoformat()
+            apply_decay(cat)
+        self.assertGreater(cat["boredom"], 0)
+
+    def test_frequent_refreshes_do_not_freeze_rest(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 100.0
+        for _ in range(12):
+            cat["rest_updated_at"] = (
+                datetime.utcnow() - timedelta(minutes=5)
+            ).isoformat()
+            sleep_need_percent(cat)
+        self.assertLess(cat["rest_level"], 100.0)
+
+    def test_overused_talk_is_not_recommended_or_bypassed(self) -> None:
+        cat = old_cat(0)
+        cat["boredom"] = 70
+        cat["last_care_action"] = "talk"
+        cat["same_action_streak"] = 4
+        cat["last_care_at"] = datetime.utcnow().isoformat()
+        cat["last_talk"] = datetime.utcnow().isoformat()
+        self.assertFalse(can_bypass_action_cooldown(cat, "talk"))
+        self.assertNotEqual(recommended_action(cat), "talk")
 
     def test_routine_streak_expires_after_six_hours(self) -> None:
         cat = old_cat(0)
@@ -165,6 +252,19 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["slept_today_hours"] = 0.0
         apply_decay(cat)
         self.assertEqual(cat["boredom"], 20)
+
+    def test_long_continuous_sleep_adds_boredom_after_ten_hours(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["boredom"] = 20
+        cat["rest_level"] = 90
+        cat["rest_updated_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["last_decay_at"] = (now - timedelta(hours=2)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=12)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
+        cat["slept_today_hours"] = 0.0
+        apply_decay(cat)
+        self.assertGreater(cat["boredom"], 20)
 
     def test_oversleep_adds_boredom(self) -> None:
         cat = old_cat(0)

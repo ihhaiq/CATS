@@ -90,7 +90,7 @@ async def build_rich_card(
         return f"<mark><b>{value}</b></mark>" if highlight else value
 
     action_highlights = {
-        "feed": {"fullness", "happiness", "love", "trust"},
+        "feed": {"fullness", "happiness", "love", "trust", "boredom"},
         "play": {
             "fullness",
             "happiness",
@@ -109,6 +109,7 @@ async def build_rich_card(
         },
         "talk": {"happiness", "love", "trust", "boredom"},
         "sleep": {"rest"},
+        "relax": {"happiness", "love", "boredom", "rest"},
     }.get(media_kind, set())
 
     fullness_cell = stat_cell(
@@ -138,12 +139,73 @@ async def build_rich_card(
 
     needs = collect_needs(cat)
     next_action = recommended_action(cat)
+
+    note_labels = {
+        "starving": "جائعة جدًا",
+        "hungry": "جائعة",
+        "peckish": "جائعة شوي",
+        "exhausted": "منهكة جدًا وتحتاج نوم",
+        "tired": "متعبة وتحتاج ترتاح",
+        "sleepy": "بدت تنعس",
+        "very_bored": "ملل قاتل",
+        "bored": "تحس بملل",
+        "restless": "بدت تمل",
+        "very_sad": "حزينة جدًا",
+        "sad": "مزاجها مو زين",
+        "love_critical": "حاسّة بإهمال قوي",
+        "love_low": "محتاجة حنان واهتمام",
+        "trust_critical": "ثقتها بيك ضعيفة جدًا",
+        "trust_low": "ثقتها بيك نازلة",
+        "walk_due": "محتاجة نزهة وتغيير جو",
+        "attention_due": "مشتاقتلك وتريد تفاعل",
+    }
+    note_priority = [
+        "starving",
+        "exhausted",
+        "very_bored",
+        "very_sad",
+        "love_critical",
+        "trust_critical",
+        "hungry",
+        "tired",
+        "bored",
+        "sad",
+        "love_low",
+        "trust_low",
+        "peckish",
+        "walk_due",
+        "sleepy",
+        "restless",
+        "attention_due",
+    ]
+    if sleeping:
+        sleep_kind = cat.get("sleep_kind")
+        note_text = (
+            "نايمة نوم رئيسي"
+            if sleep_kind == "main"
+            else "نايمة قيلولة"
+        )
+    else:
+        note_items = [
+            note_labels[item]
+            for item in note_priority
+            if item in needs and item in note_labels
+        ]
+        if 50 < sleep_need <= 75:
+            note_items.append("تحتاج استراحة بسيطة")
+        note_text = (
+            "، و".join(note_items[:2])
+            if note_items
+            else "مرتاحـة وما تحتاج شي هسه"
+        )
+    note_cell = html.escape(note_text)
     action_labels = {
         "feed": "🍖 إطعام",
         "play": "🎾 لعب",
         "walk": "🌿 نزهة",
         "talk": "💬 تحدث",
         "sleep": "😴 نوم",
+        "relax": "🛋 استلقاء",
     }
     recommendation_html = (
         f"<p><b>🎯 المطلوب هسه: {action_labels[next_action]}</b></p>"
@@ -170,6 +232,11 @@ async def build_rich_card(
         if is_action_cooldown_bypassed(cat, "talk")
         else "تحدث"
     )
+    relax_label = (
+        "⚡ استلقاء"
+        if is_action_cooldown_bypassed(cat, "relax")
+        else "🛋 استلقاء"
+    )
     sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
     cat_id = cat.get("cat_id")
 
@@ -179,7 +246,9 @@ async def build_rich_card(
         action_buttons_html = f"""
 <tg-button-row align="center">
 <tg-button type="callback_data" style="primary" data="{action_data('wake')}">إيقاظ</tg-button>
-<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="success" data="{action_data('status')}">🔄 تحديث</tg-button>
 </tg-button-row>
 """.strip()
     else:
@@ -191,8 +260,11 @@ async def build_rich_card(
 </tg-button-row>
 <tg-button-row align="center">
 <tg-button type="callback_data" data="{action_data('talk')}">{talk_label}</tg-button>
+<tg-button type="callback_data" data="{action_data('relax')}">{relax_label}</tg-button>
 <tg-button type="callback_data" data="{action_data('sleep')}">{sleep_button_label}</tg-button>
-<tg-button type="callback_data" data="{action_data('status')}">تحديث</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="success" data="{action_data('status')}">🔄 تحديث</tg-button>
 </tg-button-row>
 """.strip()
     hint_map = {
@@ -230,6 +302,7 @@ async def build_rich_card(
         ],
         "walk": ["walk_due"],
         "play": ["very_bored", "bored", "restless"],
+        "relax": ["sleepy", "restless"],
     }
     fallback_priority = [
         "starving",
@@ -279,7 +352,9 @@ async def build_rich_card(
 <tr><td>الثقة</td><td>{trust_cell}</td></tr>
 <tr><td>الملل</td><td>{boredom_cell}</td></tr>
 <tr><td>الراحة</td><td>{sleep_cell}</td></tr>
+<tr><td><b>ملاحظة</b></td><td>{note_cell}</td></tr>
 </table>
+<p><i>ℹ️ الشبع: 100 = شبعانة جدًا، 0 = جائعة جدًا. الملل: 0 = مرتاحة وغير مَلّانة، 100 = ملل شديد.</i></p>
 <p><b>{state_hint}</b></p>
 {recommendation_html}
 <p>🐾 العملة القططية: {points}</p>
