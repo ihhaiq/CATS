@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -63,6 +64,7 @@ def _state_has_data(data: dict | None) -> bool:
             "user_inventory",
             "points_log",
             "media",
+            "media_types",
             "media_cache",
             "media_overrides",
         )
@@ -72,6 +74,7 @@ def _state_has_data(data: dict | None) -> bool:
 def _normalize_legacy_state(data: dict) -> dict:
     if not isinstance(data, dict):
         raise ValueError("legacy Catibot state must be a JSON object")
+
     normalized = default_runtime_state()
     for key in normalized:
         value = data.get(key)
@@ -97,6 +100,7 @@ def _remove_legacy_files(paths: list[Path]) -> None:
 async def _migrate_legacy_json() -> None:
     candidates = _legacy_json_candidates()
     existing = [path for path in candidates if path.is_file()]
+    cleanup_after_commit = False
 
     async with get_session() as session:
         async with session.begin():
@@ -107,32 +111,39 @@ async def _migrate_legacy_json() -> None:
                 await session.flush()
 
             if _state_has_data(row.data):
-                should_cleanup = True
-            else:
-                should_cleanup = False
+                cleanup_after_commit = bool(existing)
+            elif existing:
+                errors: list[str] = []
+                migrated = False
+
                 for path in existing:
                     try:
                         raw = json.loads(path.read_text(encoding="utf-8"))
                         row.data = _normalize_legacy_state(raw)
-                        row.updated_at = __import__("datetime").datetime.utcnow()
-                        should_cleanup = True
+                        row.updated_at = datetime.utcnow()
+                        migrated = True
+                        cleanup_after_commit = True
                         logger.info(
                             "Migrated legacy Catibot JSON state into PostgreSQL from %s",
                             path,
                         )
                         break
                     except (OSError, json.JSONDecodeError, ValueError) as exc:
-                        logger.error(
-                            "Could not migrate legacy JSON state from %s: %s",
+                        errors.append(f"{path}: {exc}")
+                        logger.warning(
+                            "Legacy JSON candidate could not be imported: %s (%s)",
                             path,
                             exc,
                         )
-                        raise RuntimeError(
-                            "Legacy JSON state exists but could not be migrated; "
-                            "startup stopped to prevent data loss."
-                        ) from exc
 
-    if should_cleanup:
+                if not migrated:
+                    raise RuntimeError(
+                        "Legacy JSON state files exist but none could be migrated; "
+                        "startup stopped to prevent data loss. "
+                        + " | ".join(errors)
+                    )
+
+    if cleanup_after_commit:
         _remove_legacy_files(existing)
 
 
