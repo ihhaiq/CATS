@@ -1,4 +1,4 @@
-"""Storage initialization for local JSON mode and future PostgreSQL mode."""
+"""Storage bootstrap for the JSON runtime and PostgreSQL schema."""
 import json
 import logging
 import shutil
@@ -55,7 +55,11 @@ if settings.storage_backend == "postgres":
         raise RuntimeError("DATABASE_URL is required when STORAGE_BACKEND=postgres")
     database_url = settings.database_url
     if database_url.startswith("postgresql://"):
-        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        database_url = database_url.replace(
+            "postgresql://",
+            "postgresql+asyncpg://",
+            1,
+        )
     engine = create_async_engine(database_url, echo=False)
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -69,7 +73,10 @@ async def init_db() -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     except Exception as exc:
-        logger.warning("PostgreSQL unavailable (%s); falling back to JSON storage", exc)
+        logger.warning(
+            "PostgreSQL unavailable (%s); falling back to JSON storage",
+            exc,
+        )
         settings.storage_backend = "json"
         _init_json_store()
 
