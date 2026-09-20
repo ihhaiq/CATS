@@ -130,6 +130,10 @@ def _write(data: dict) -> None:
         path,
         json.dumps(data, ensure_ascii=False, indent=2),
     )
+    # Keep the backup at the same successfully written state. Atomic replace
+    # protects the primary from partial writes; the copy protects restarts
+    # from later corruption or accidental primary-file loss.
+    shutil.copy2(path, backup)
 
 
 def now_iso() -> str:
@@ -823,7 +827,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
         ) and streak < 4
 
         if streak == 1:
-            happiness_gain, love_gain, boredom_delta = 18, 6, -45
+            happiness_gain, love_gain, boredom_delta = 18, 6, -100
         elif streak == 2:
             happiness_gain, love_gain, boredom_delta = 12, 4, -28
         elif streak == 3:
