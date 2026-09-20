@@ -14,6 +14,7 @@ from bot.services.local_store import (
     action_block_reason,
     apply_care_effects,
     apply_decay,
+    apply_light_interaction,
     award_points,
     can_bypass_action_cooldown,
     care_reward_points,
@@ -71,6 +72,11 @@ _ALIASES = {
     "تحدث": "talk",
     "احجي": "talk",
 
+    "relax": "relax",
+    "استلقاء": "relax",
+    "استرخاء": "relax",
+    "تلفاز": "relax",
+
     "sleep": "sleep",
     "نوم": "sleep",
     "نام": "sleep",
@@ -102,6 +108,7 @@ _GUEST_HELP = (
     "لعب / play\n"
     "نزهة / walk\n"
     "تحدث / talk\n"
+    "استلقاء / relax\n"
     "نوم / sleep\n"
     "إيقاظ / wake\n"
     "متجر / shop\n"
@@ -262,6 +269,7 @@ async def _guest_message_locked(message: Message) -> None:
                 "last_care_at": None,
                 "last_social_at": stamp,
                 "last_talk": None,
+                "last_relax": None,
                 "same_action_streak": 0,
                 "partner_affinity": 0,
                 "is_fled": False,
@@ -336,7 +344,7 @@ async def _guest_message_locked(message: Message) -> None:
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
-            if action in {"feed", "play", "walk", "talk"}:
+            if action in {"feed", "play", "walk", "talk", "relax"}:
                 if is_sleeping(cat):
                     card = await _build_guest_card(
                         message,
@@ -360,18 +368,12 @@ async def _guest_message_locked(message: Message) -> None:
 
                 block_reason = action_block_reason(cat, action)
                 if block_reason:
-                    if block_reason == "full":
-                        title = "😺 القطة شبعانة"
-                        description = "ما تحتاج أكل زيادة هسه."
-                    elif block_reason == "starving":
+                    if block_reason == "starving":
                         title = "🚨 الجوع أولاً"
                         description = "أطعمها قبل اللعب أو النزهة."
-                    elif block_reason == "bored_of_play":
-                        title = "😾 ملت من نفس اللعب"
-                        description = "غيّر النشاط: حچي وياها أو طلّعها نزهة."
                     else:
-                        title = "🪫 تحتاج نوم"
-                        description = "خليها ترتاح قبل اللعب أو النزهة."
+                        title = "🪫 تحتاج راحة"
+                        description = "هي منهكة؛ خليها ترتاح قبل اللعب أو النزهة."
                     await update_cat(cat)
                     card = await _build_guest_card(
                         message,
@@ -394,12 +396,14 @@ async def _guest_message_locked(message: Message) -> None:
                     "play": "last_played",
                     "walk": "last_walk",
                     "talk": "last_talk",
+                    "relax": "last_relax",
                 }[action]
                 cooldown = {
                     "feed": settings.feed_cooldown,
                     "play": settings.play_cooldown,
                     "walk": settings.walk_cooldown,
                     "talk": settings.talk_cooldown,
+                    "relax": settings.relax_cooldown,
                 }[action]
                 last_action = cat.get(timestamp_key)
                 if last_action:
@@ -412,26 +416,13 @@ async def _guest_message_locked(message: Message) -> None:
 
                 need_bypass = can_bypass_action_cooldown(cat, action)
                 bypassed = not ready and need_bypass
-                if not ready and not need_bypass:
-                    await update_cat(cat)
-                    card = await _build_guest_card(
-                        message,
-                        caller,
-                        cat,
-                        await get_user_points(user_id),
-                        "status",
-                    )
-                    result = InlineQueryResultArticle(
-                        id=f"guest-{action}-cooldown",
-                        title="⏳ فترة تهدئة",
-                        description=f"ارجع بعد {max(1, seconds_left // 60)} دقيقة.",
-                        input_message_content=InputRichMessageContent(rich_message=card),
-                    )
-                    await message.bot.answer_guest_query(message.guest_query_id, result)
-                    return
+                soft_interaction = not ready and not need_bypass
 
-                apply_care_effects(cat, action)
-                cat[timestamp_key] = datetime.utcnow().isoformat()
+                if soft_interaction:
+                    apply_light_interaction(cat, action)
+                else:
+                    apply_care_effects(cat, action)
+                    cat[timestamp_key] = datetime.utcnow().isoformat()
 
                 if action == "feed":
                     title = "🍖 تم الإطعام"
@@ -442,8 +433,10 @@ async def _guest_message_locked(message: Message) -> None:
                         title = "🎾 لعبت وياها"
                 elif action == "walk":
                     title = "🌿 طلعت نزهة"
-                else:
+                elif action == "talk":
                     title = "💬 حچيت وياها"
+                else:
+                    title = "🛋 استلقت وياك"
 
                 points = care_reward_points(
                     cat,
@@ -456,13 +449,19 @@ async def _guest_message_locked(message: Message) -> None:
                 else:
                     balance = await get_user_points(user_id)
 
-                if bypassed:
+                if soft_interaction:
                     description = (
-                        "⚡ التهدئة انفتحت للحاجة؛ الرعاية تنحسب بدون نقاط إضافية."
+                        "😺 التفاعل مسموح أثناء التهدئة؛ تأثيره خفيف وبدون نقاط."
                     )
+                elif bypassed:
+                    description = (
+                        "⚡ احتاجت الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية."
+                    )
+                elif action == "relax":
+                    description = "🛋 استلقت يمك وتابعت التلفاز بهدوء."
                 elif not cat.get("last_care_meaningful", False):
                     description = (
-                        "😺 تفاعل اختياري؛ ما كانت محتاجته هسه، لذلك بدون نقاط."
+                        "😺 تفاعل اختياري مسموح؛ فائدته بسيطة وبدون نقاط."
                     )
                 else:
                     description = cat["name"]
