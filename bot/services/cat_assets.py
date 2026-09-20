@@ -26,6 +26,7 @@ CAT_STATES: tuple[str, ...] = (
 
 LEGACY_STATE_MAP: dict[str, str] = {
     "status": "idle",
+    "relax": "idle",
     "cat_angry_sleep": "angry",
 }
 
