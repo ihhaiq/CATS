@@ -368,18 +368,12 @@ async def _guest_message_locked(message: Message) -> None:
 
                 block_reason = action_block_reason(cat, action)
                 if block_reason:
-                    if block_reason == "full":
-                        title = "😺 القطة شبعانة"
-                        description = "ما تحتاج أكل زيادة هسه."
-                    elif block_reason == "starving":
+                    if block_reason == "starving":
                         title = "🚨 الجوع أولاً"
                         description = "أطعمها قبل اللعب أو النزهة."
-                    elif block_reason == "bored_of_play":
-                        title = "😾 ملت من نفس اللعب"
-                        description = "غيّر النشاط: حچي وياها أو طلّعها نزهة."
                     else:
-                        title = "🪫 تحتاج نوم"
-                        description = "خليها ترتاح قبل اللعب أو النزهة."
+                        title = "🪫 تحتاج راحة"
+                        description = "هي منهكة؛ خليها ترتاح قبل اللعب أو النزهة."
                     await update_cat(cat)
                     card = await _build_guest_card(
                         message,
