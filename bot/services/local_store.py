@@ -618,7 +618,8 @@ def _action_overused(cat: dict, action: str, moment: datetime) -> bool:
     recent = (
         moment - parse_time(previous_at)
     ).total_seconds() <= ROUTINE_WINDOW_HOURS * 3600
-    return recent and int(cat.get("same_action_streak", 0)) >= 5
+    threshold = 4 if action in {"talk", "walk", "relax"} else 5
+    return recent and int(cat.get("same_action_streak", 0)) >= threshold
 
 
 def apply_light_interaction(cat: dict, action: str) -> None:
@@ -863,11 +864,20 @@ def can_bypass_action_cooldown(cat: dict, action: str) -> bool:
             and not _action_overused(cat, "play", moment)
         )
     if action == "walk":
-        return _walk_hours(cat, moment) >= WALK_DUE_HOURS
+        return (
+            _walk_hours(cat, moment) >= WALK_DUE_HOURS
+            and not _action_overused(cat, "walk", moment)
+        )
     if action == "talk":
-        return _attention_due(cat, moment)
+        return (
+            _attention_due(cat, moment)
+            and not _action_overused(cat, "talk", moment)
+        )
     if action == "relax":
-        return sleep_need_percent(cat) <= 75 or int(cat.get("boredom", 10)) >= 35
+        return (
+            (sleep_need_percent(cat) <= 75 or int(cat.get("boredom", 10)) >= 35)
+            and not _action_overused(cat, "relax", moment)
+        )
     return False
 
 
@@ -895,14 +905,22 @@ def recommended_action(cat: dict) -> str | None:
         return "feed"
     if rest <= 30:
         return "sleep"
-    if _attention_due(cat, moment):
+
+    attention_due = _attention_due(cat, moment)
+    talk_overused = _action_overused(cat, "talk", moment)
+    walk_overused = _action_overused(cat, "walk", moment)
+    play_overused = _action_overused(cat, "play", moment)
+
+    if attention_due and not talk_overused:
         return "talk"
-    if _walk_hours(cat, moment) >= WALK_DUE_HOURS:
+    if _walk_hours(cat, moment) >= WALK_DUE_HOURS and not walk_overused:
         return "walk"
     if int(cat.get("boredom", 10)) >= 35:
-        if _action_overused(cat, "play", moment):
-            return "talk"
-        return "play"
+        if not play_overused:
+            return "play"
+        return "relax"
+    if attention_due:
+        return "relax"
     if rest <= 50:
         return "sleep"
     if rest <= 75:
