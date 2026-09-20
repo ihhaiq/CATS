@@ -10,6 +10,7 @@ from bot.services.local_store import (
   action_block_reason,
   apply_care_effects,
   apply_decay,
+  apply_light_interaction,
   award_points,
   can_bypass_action_cooldown,
   care_reward_points,
@@ -52,6 +53,11 @@ async def cmd_talk(message: Message) -> None:
   await _care(message, "talk")
 
 
+@router.message(Command("relax", "استلقاء", "استرخاء", "تلفاز"))
+async def cmd_relax(message: Message) -> None:
+  await _care(message, "relax")
+
+
 async def _care(message: Message, action: str) -> None:
   user_id = message.from_user.id
   async with user_action_lock(user_id):
@@ -75,10 +81,6 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")
     return
-  if cat.get("is_fled"):
-    await update_cat(cat)
-    await message.answer("💨 القطة هربت بسبب الإهمال، وما تگدر تستخدم أفعال العناية عليها.")
-    return
   if is_sleeping(cat):
     await update_cat(cat)
     remaining = sleep_duration_text(sleep_remaining_minutes(cat))
@@ -91,14 +93,10 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   block_reason = action_block_reason(cat, action)
   if block_reason:
     await update_cat(cat)
-    if block_reason == "full":
-      await message.answer("😺 القطة شبعانة هسه وما تحتاج أكل زيادة.")
-    elif block_reason == "starving":
+    if block_reason == "starving":
       await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.")
-    elif block_reason == "bored_of_play":
-      await message.answer("😾 ملت من نفس اللعب. حچي وياها أو طلّعها نزهة وغيّر الروتين.")
     else:
-      await message.answer("🪫 القطة تعبانة وتحتاج نوم قبل اللعب أو النزهة.")
+      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو النزهة.")
     return
 
   timestamp_key = {
@@ -106,12 +104,14 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     "play": "last_played",
     "walk": "last_walk",
     "talk": "last_talk",
+    "relax": "last_relax",
   }[action]
   cooldown = {
     "feed": settings.feed_cooldown,
     "play": settings.play_cooldown,
     "walk": settings.walk_cooldown,
     "talk": settings.talk_cooldown,
+    "relax": settings.relax_cooldown,
   }[action]
 
   last_action = cat.get(timestamp_key)
@@ -121,15 +121,14 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     ready, seconds_left = True, 0
 
   bypass_cooldown = can_bypass_action_cooldown(cat, action)
-  if not ready and not bypass_cooldown:
-    await message.answer(
-      f"⏳ انتظر {max(1, seconds_left // 60)} دقيقة قبل هذا الفعل مرة ثانية."
-    )
-    await update_cat(cat)
-    return
+  bypassed = not ready and bypass_cooldown
+  soft_interaction = not ready and not bypass_cooldown
 
-  apply_care_effects(cat, action)
-  cat[timestamp_key] = datetime.utcnow().isoformat()
+  if soft_interaction:
+    apply_light_interaction(cat, action)
+  else:
+    apply_care_effects(cat, action)
+    cat[timestamp_key] = datetime.utcnow().isoformat()
 
   if action == "feed":
     text = "🍖 أكلت القطة وصارت أهدأ وأسعد"
@@ -140,21 +139,25 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
       text = "🎾 انبسطت القطة باللعب"
   elif action == "walk":
     text = "🌿 طلعت القطة نزهة وانبسطت"
-  else:
+  elif action == "talk":
     text = "💬 ارتاحت القطة للحچي وياك"
+  else:
+    text = "🛋 استلقت يمك وصارت تتابع التلفاز بهدوء"
 
-  bypassed = bypass_cooldown and not ready
   points = care_reward_points(cat, action, bypassed_cooldown=bypassed)
   await update_cat(cat)
   balance = await award_points(user_id, points, action) if points else await get_user_points(user_id)
-  if bypassed:
+  if soft_interaction:
     reward_note = (
-      "\n⚡ انفتحت فترة التهدئة لأن قطتك كانت تحتاج هذا الفعل؛ "
-      "الرعاية تنحسب بدون نقاط إضافية."
+      "\n😺 التفاعل مسموح، بس التهدئة بعدها شغالة؛ تأثيره خفيف وبدون نقاط."
+    )
+  elif bypassed:
+    reward_note = (
+      "\n⚡ قطتك كانت تحتاج هذا الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية."
     )
   elif not cat.get("last_care_meaningful", False):
     reward_note = (
-      "\n😺 هذا تفاعل اختياري؛ قطتك ما كانت محتاجته هسه، لذلك بدون نقاط."
+      "\n😺 هذا تفاعل اختياري؛ مسموح عادي، بس فائدته بسيطة وبدون نقاط."
     )
   else:
     reward_note = ""
