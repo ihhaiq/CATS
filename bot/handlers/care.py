@@ -99,9 +99,9 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   if block_reason:
     await update_cat(cat)
     if block_reason == "starving":
-      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو النزهة.")
+      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة.")
     else:
-      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو النزهة.")
+      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة.")
     return
 
   timestamp_key = {
