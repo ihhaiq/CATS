@@ -102,6 +102,7 @@ async def _create_cat_for_user(user_id: int, name: str) -> dict:
     "last_care_at": None,
     "last_social_at": stamp,
     "last_talk": None,
+    "last_toy": None,
     "last_relax": None,
     "same_action_streak": 0,
     "partner_affinity": 0,
@@ -161,6 +162,7 @@ async def cb_guide_open(query: CallbackQuery) -> None:
       "• 🐾 تبنّى قطة واختار إلها اسم.\n"
       "• 🍖 حافظ على الشبع بالإطعام.\n"
       "• 🎾 اللعب والنزهة يرفعون السعادة.\n"
+      "• 🧸 اللعبة ترفع السعادة والحب وتقتل الملل، بس إذا تكررها هواية راح تمل منها.\n"
       "• 😴 عداد الراحة ينزل بسرعة ويرتفع ببطء، يعني القطة تحتاج نوم فعلي وكافي.\n"
       "• 🌀 الأكل واللعب والتفاعل المتنوع يقللون الملل، لكن تكرار نفس الحديث أو النزهة والنوم الطويل يزيدوه.\n"
       "• 🤝 الثقة تزيد بالرعاية الثابتة وتنزل بالإهمال الشديد.\n"
