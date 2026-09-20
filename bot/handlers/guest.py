@@ -377,10 +377,10 @@ async def _guest_message_locked(message: Message) -> None:
                 if block_reason:
                     if block_reason == "starving":
                         title = "🚨 الجوع أولاً"
-                        description = "أطعمها قبل اللعب أو النزهة."
+                        description = "أطعمها قبل اللعب أو اللعبة أو النزهة."
                     else:
                         title = "🪫 تحتاج راحة"
-                        description = "هي منهكة؛ خليها ترتاح قبل اللعب أو النزهة."
+                        description = "هي منهكة؛ خليها ترتاح قبل اللعب أو اللعبة أو النزهة."
                     await update_cat(cat)
                     card = await _build_guest_card(
                         message,
