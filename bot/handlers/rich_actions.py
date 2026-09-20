@@ -276,10 +276,21 @@ async def _handle_rich_action_locked(
             bypassed_cooldown=bypassed_cooldown,
         )
 
-        if action == "play" and int(cat.get("same_action_streak", 1)) >= 5:
+        streak = int(cat.get("same_action_streak", 1))
+        if action == "play" and streak >= 5:
             notice_token = _set_action_notice(
                 cat,
                 "😾 ملت من نفس اللعب؛ تگدر تبقى تتفاعل وياها، بس غيّر النشاط حتى تستمتع أكثر.",
+            )
+        elif action == "talk" and streak >= 4:
+            notice_token = _set_action_notice(
+                cat,
+                "😾 طولت بالحچي بنفس الروتين وبدت تمل؛ جرّب لعب، استلقاء أو نزهة.",
+            )
+        elif action == "walk" and streak >= 4:
+            notice_token = _set_action_notice(
+                cat,
+                "😾 كثرت النزهات بنفس الروتين وبدت تمل؛ غيّر النشاط شوي.",
             )
         elif action == "relax":
             notice_token = _set_action_notice(
