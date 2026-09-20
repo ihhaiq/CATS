@@ -14,6 +14,7 @@ from bot.services.local_store import (
   award_points,
   can_bypass_action_cooldown,
   care_reward_points,
+  claim_daily_bonus,
   ensure_user,
   finish_sleep,
   fullness_percent,
@@ -71,6 +72,7 @@ async def _care(message: Message, action: str) -> None:
 
 async def _care_locked(message: Message, action: str, user_id: int) -> None:
   await ensure_user(user_id)
+  daily_bonus = await claim_daily_bonus(user_id)
   cat = await get_user_cat(user_id)
   if cat is None:
     latest = await get_latest_cat_for_user(user_id)
@@ -187,8 +189,14 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     )
   else:
     reward_note = ""
+  if daily_bonus:
+    bonus_points, streak = daily_bonus
+    day_word = "يوم" if streak == 1 else "أيام"
+    daily_note = f"\n🔥 أول زيارة اليوم! +{bonus_points} نقطة (متتالية {streak} {day_word})"
+  else:
+    daily_note = ""
   await message.answer(
-    f"{text}!{reward_note}\n"
+    f"{text}!{reward_note}{daily_note}\n"
     f"الشبع: {fullness_percent(cat)}/100 | السعادة: {cat['happiness']}/100 | "
     f"الملل: {cat.get('boredom', 10)}/100 | الراحة: {sleep_need_percent(cat)}/100\n"
     f"نقاطك: {balance}"
