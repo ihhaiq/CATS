@@ -1,5 +1,4 @@
 """Small economy helpers shared by active handlers."""
-import random
 from datetime import datetime
 
 from bot.services.cat_assets import BREED_POOL
