@@ -16,6 +16,7 @@ from bot.services.local_store import (
   care_reward_points,
   claim_daily_bonus,
   ensure_user,
+  defer_sleep_for_owner,
   finish_sleep,
   fullness_percent,
   get_latest_cat_for_user,
@@ -83,7 +84,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     return
 
   apply_decay(cat)
-  finish_sleep(cat)
+  finish_sleep(cat, owner_present=True)
   if mark_fled_if_needed(cat):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")
@@ -96,6 +97,9 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
       "إذا تريد تتفاعل وياها، صحّيها أولاً."
     )
     return
+
+  if action in {"play", "toy", "walk", "talk", "relax"}:
+    defer_sleep_for_owner(cat)
 
   block_reason = action_block_reason(cat, action)
   if block_reason:
