@@ -34,8 +34,9 @@ bot/assets/cats/siamese/adult/play.png
 
 حاليًا:
 
-- التبنّي الجديد يستخدم `siamese`.
-- القطة القديمة تحتفظ بسلالتها.
+- التبنّي الجديد يعرض خيارين: `siamese` و`black`.
+- القطة القديمة تحتفظ بسلالتها إذا كانت من سلالة معطلة، إلى أن يختار صاحبها تغييرها.
+- إشعار تغيير السلالة يعرض `siamese` و`black` فقط.
 - صور السلالة القديمة تستخدم fallback إذا لم يتوفر الأصل المطلوب.
 
 ## مراحل العمر
@@ -80,29 +81,21 @@ bot/assets/cats/<breed>/<age_stage>/relax.png
 
 ولا نضيفها إلى runtime إلا بعد توفير الأصول واختبار resolver.
 
-## الوضع الحالي لـSiamese
+## الوضع الحالي للسلالات المفعلة
 
-الموجود حاليًا:
-
-```text
-bot/assets/cats/siamese/adult/idle.png
-bot/assets/cats/siamese/adult/hungry.png
-bot/assets/cats/siamese/adult/sleep.png
-bot/assets/cats/siamese/adult/angry.png
-```
-
-الناقص حاليًا للبالغ:
+مكتبة `adult` مكتملة حاليًا للحالات الرسمية العشر في:
 
 ```text
-happy.png
-feed.png
-play.png
-walk.png
-talk.png
-sick.png
+bot/assets/cats/siamese/adult/
+bot/assets/cats/black/adult/
 ```
 
-ولا توجد حاليًا صورة مخصصة لـ`play` أو وضعية `relax`. لذلك قد تظهر صورة fallback أو رسالة عدم توفر الصورة، حسب مصدر الوسائط الموجود.
+ولهذا السلالتان المتاحتان حاليًا في واجهة التبنّي وتغيير السلالة هما:
+
+- `siamese`
+- `black`
+
+وضعية `relax` ما زالت تستخدم `idle.png` كـfallback إلى أن نضيف أصلًا مستقلًا لها.
 
 ## أسلوب الرسم
 
