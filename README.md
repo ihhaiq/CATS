@@ -105,3 +105,8 @@ confirm PostgreSQL initialization.
 python -m compileall -q bot
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+
+## Temporary breed rollout
+
+The multi-breed system and all breed code remain in the repository, but breeds without a complete image set are temporarily disabled. New adoptions currently choose between `siamese` and `black`. Existing owners on a disabled breed can keep their current cat or use the breed-change notice to switch to either active breed.

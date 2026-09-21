@@ -58,3 +58,8 @@ cache metadata, and admin overrides are persisted in PostgreSQL.
 python -m compileall -q bot
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+
+## Temporary breed availability
+
+Keep the complete breed model, pool, resolver, and asset paths intact. Additional breeds are temporarily disabled because the image library requires a large number of images. `siamese` and `black` are the active breeds: new adoptions must let the user choose between them, and existing owners on a temporarily disabled breed may switch to either from the breed-change notice. Do not delete the disabled breed code or assets.

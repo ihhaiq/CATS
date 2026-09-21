@@ -99,7 +99,7 @@ Catibot resolves the visual state centrally, then searches the filesystem:
 requested age first, adult fallback second, then legacy-compatible local paths.
 Only after local resolution fails does it use old Telegram `file_id` entries.
 
-A local PNG is uploaded lazily the first time Telegram needs it. JSON stores
+A local PNG is uploaded lazily the first time Telegram needs it. PostgreSQL stores
 only its reusable `file_id`, SHA-256, media type and relative path. Replacing a
 PNG in Git changes the hash and automatically refreshes the Telegram cache on
 next use. There is no startup upload of the full library.
@@ -124,14 +124,20 @@ Do not add empty placeholder PNG files. Missing assets are intentionally handled
 by runtime fallbacks until the library is complete.
 
 
-## Current Siamese adult smoke-test assets
+## Current active adult breed sets
 
-The runtime test command expects these official files:
+The official ten-state adult sets are currently complete for:
 
-- `siamese/adult/idle.png`
-- `siamese/adult/hungry.png`
-- `siamese/adult/sleep.png`
-- `siamese/adult/angry.png`
+- `siamese/adult/`
+- `black/adult/`
 
-After deploy, run `/dev_media_test` as an admin to exercise all four through
+New adoption offers these two breeds. Other breed code and paths remain intact
+but are temporarily hidden from the adoption UI until their asset sets are ready.
+
+After deploy, run `/dev_media_test` as an admin to exercise the assets through
 the same Rich Message path used by the bot.
+
+
+## دليل الرسم والحالات
+
+للتفاصيل الكاملة عن هوية القطة، الوضعيات، الحالات، الصور الموجودة والناقصة، راجع [CAT_ART_GUIDE.md](CAT_ART_GUIDE.md).

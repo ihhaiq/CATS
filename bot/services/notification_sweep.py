@@ -11,6 +11,7 @@ except ModuleNotFoundError:
    AsyncIOScheduler = None
 
 from bot.config import settings
+from bot.services.media_runtime import resolve_cat_media
 from bot.services.local_store import (
    apply_decay,
    collect_needs,
@@ -28,6 +29,70 @@ _scheduler: Any = None
 _fallback_tasks: list[asyncio.Task] = []
 _sweep_lock = asyncio.Lock()
 logger = logging.getLogger("catibot.notification_sweep")
+
+def _notification_visual_state(needs: list[str]) -> str:
+   """Choose one visual state for a grouped needs notification."""
+   priority = (
+      ("starving", "hungry"),
+      ("hungry", "hungry"),
+      ("peckish", "hungry"),
+      ("exhausted", "sick"),
+      ("tired", "sick"),
+      ("sleepy", "sick"),
+      ("very_sad", "sick"),
+      ("sad", "sick"),
+      ("very_bored", "play"),
+      ("bored", "play"),
+      ("restless", "play"),
+      ("walk_due", "walk"),
+      ("attention_due", "talk"),
+   )
+   need_set = set(needs)
+   for need, visual_state in priority:
+      if need in need_set:
+         return visual_state
+   return "idle"
+
+
+async def _send_need_notice(
+   bot: Bot,
+   cat: dict,
+   user_id: int,
+   message: str,
+   needs: list[str],
+   visual_state: str | None = None,
+) -> None:
+   """Send a notification with the best available cat asset."""
+   visual_state = visual_state or _notification_visual_state(needs)
+   try:
+      resolved = await resolve_cat_media(
+         bot,
+         cat,
+         visual_state,
+         upload_chat_id=settings.media_cache_chat_id or user_id,
+      )
+      if resolved and resolved.media_type == "photo":
+         await bot.send_photo(
+            user_id,
+            resolved.file_id,
+            caption=message,
+         )
+         return
+      if resolved and resolved.media_type == "video":
+         await bot.send_video(
+            user_id,
+            resolved.file_id,
+            caption=message,
+         )
+         return
+   except Exception as exc:
+      logger.warning(
+         "Failed to resolve notification media user_id=%s: %s",
+         user_id,
+         exc,
+      )
+   await bot.send_message(user_id, message)
+
 
 _NEED_MESSAGES = {
    "love_critical": "💔 حبها ورابطتها وياك صارت بحالة حرجة وتحتاج اهتمام حقيقي.",
@@ -67,7 +132,14 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
    }
    for user_id in recipients - sent_to:
       try:
-         await bot.send_message(user_id, message)
+         await _send_need_notice(
+            bot,
+            cat,
+            user_id,
+            message,
+            [],
+            visual_state="idle",
+         )
          sent_to.add(user_id)
       except Exception as exc:
          logger.warning("Failed to send wake notice user_id=%s: %s", user_id, exc)
@@ -87,7 +159,14 @@ async def _send_fled_notice(bot: Bot, cat: dict) -> None:
    message = "💨 قطتك هربت بسبب الإهمال."
    for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
       try:
-         await bot.send_message(user_id, message)
+         await _send_need_notice(
+            bot,
+            cat,
+            user_id,
+            message,
+            [],
+            visual_state="angry",
+         )
       except Exception as exc:
          logger.warning("Failed to send flee notice user_id=%s: %s", user_id, exc)
 
@@ -203,7 +282,13 @@ async def _sweep(bot: Bot) -> None:
                message = f"{header}\n{details}"
                for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
                   try:
-                     await bot.send_message(user_id, message)
+                     await _send_need_notice(
+                        bot,
+                        cat,
+                        user_id,
+                        message,
+                        needs,
+                     )
                   except Exception as exc:
                      logger.warning("Failed to notify user_id=%s: %s", user_id, exc)
                cat["last_notified_state"] = state
