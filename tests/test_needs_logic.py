@@ -362,6 +362,18 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["sleep_kind"] = "main"
         self.assertTrue(sleep_ready_to_finish(cat, now))
 
+    def test_main_sleep_never_extends_past_planned_end(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["rest_level"] = 20
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_planned_hours"] = 1.0
+        cat["sleep_kind"] = "main"
+        self.assertTrue(finish_sleep(cat, owner_present=True))
+        self.assertIsNone(cat["sleep_until"])
+
     def test_natural_wake_queues_notification(self) -> None:
         cat = old_cat(0)
         now = datetime.utcnow()
