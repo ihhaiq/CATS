@@ -11,10 +11,12 @@ from bot.services.local_store import (
     can_bypass_action_cooldown,
     care_reward_points,
     collect_needs,
+    defer_sleep_for_owner,
     notification_gap_seconds,
     finish_sleep,
     is_action_cooldown_bypassed,
     recommended_action,
+    should_auto_sleep,
     sleep_plan,
     sleep_need_percent,
     sleep_ready_to_finish,
@@ -62,7 +64,7 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertGreaterEqual(cat["hunger"], 85)
         self.assertLess(cat["happiness"], 70)
         self.assertLess(cat["love_bar"], 100)
-        self.assertEqual(sleep_need_percent(cat), 0)
+        self.assertLessEqual(sleep_need_percent(cat), 5)
         self.assertGreater(cat["boredom"], 10)
         self.assertLess(cat["trust"], 60)
 
@@ -160,10 +162,11 @@ class CoupledNeedsTests(unittest.TestCase):
 
         self.assertLess(neglected["trust"], recent["trust"])
 
-    def test_sleep_recovers_slower_than_awake_drain(self) -> None:
+    def test_sleep_pressure_builds_slowly_and_sleep_recovers_rest(self) -> None:
         cat = old_cat(10)
         apply_decay(cat)
-        self.assertLessEqual(sleep_need_percent(cat), 20)
+        self.assertLessEqual(sleep_need_percent(cat), 65)
+        self.assertGreaterEqual(sleep_need_percent(cat), 55)
 
         now = datetime.utcnow()
         cat["sleep_started_at"] = (now - timedelta(hours=2)).isoformat()
@@ -172,7 +175,7 @@ class CoupledNeedsTests(unittest.TestCase):
         before = cat["rest_level"]
         after = sleep_need_percent(cat)
         self.assertGreater(after, before)
-        self.assertLess(after - before, 25)
+        self.assertLessEqual(after - before, 30)
 
     def test_repeated_talk_eventually_adds_boredom(self) -> None:
         cat = old_cat(0)
@@ -336,8 +339,8 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["rest_updated_at"] = datetime.utcnow().isoformat()
         kind, hours = sleep_plan(cat)
         self.assertEqual(kind, "main")
-        self.assertGreaterEqual(hours, 4.0)
-        self.assertLessEqual(hours, 12.5)
+        self.assertGreaterEqual(hours, 3.0)
+        self.assertLessEqual(hours, 7.5)
 
     def test_moderately_tired_cat_gets_nap(self) -> None:
         cat = old_cat(0)
@@ -345,8 +348,8 @@ class CoupledNeedsTests(unittest.TestCase):
         cat["rest_updated_at"] = datetime.utcnow().isoformat()
         kind, hours = sleep_plan(cat)
         self.assertEqual(kind, "nap")
-        self.assertGreaterEqual(hours, 0.75)
-        self.assertLessEqual(hours, 2.5)
+        self.assertGreaterEqual(hours, 10 / 60)
+        self.assertLessEqual(hours, 25 / 60)
 
     def test_main_sleep_can_finish_when_rest_is_full(self) -> None:
         cat = old_cat(0)
@@ -467,17 +470,17 @@ class CoupledNeedsTests(unittest.TestCase):
         apply_care_effects(cat, "talk")
         self.assertFalse(can_bypass_action_cooldown(cat, "talk"))
 
-    def test_physical_actions_yield_to_hunger_and_sleep(self) -> None:
+    def test_physical_actions_yield_to_hunger_but_not_sleepiness(self) -> None:
         cat = old_cat(0)
         cat["hunger"] = 90
         self.assertEqual(action_block_reason(cat, "play"), "starving")
         self.assertEqual(action_block_reason(cat, "walk"), "starving")
 
         cat["hunger"] = 20
-        cat["rest_level"] = 30
+        cat["rest_level"] = 20
         cat["rest_updated_at"] = datetime.utcnow().isoformat()
-        self.assertEqual(action_block_reason(cat, "play"), "tired")
-        self.assertEqual(action_block_reason(cat, "walk"), "tired")
+        self.assertIsNone(action_block_reason(cat, "play"))
+        self.assertIsNone(action_block_reason(cat, "walk"))
 
     def test_recommended_action_uses_real_priority(self) -> None:
         cat = old_cat(0)
@@ -593,6 +596,64 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertIn("walk_due", needs)
         self.assertIn("very_sad", needs)
 
+
+    def test_owner_interaction_defers_auto_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 25
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertEqual(should_auto_sleep(cat), "main")
+        self.assertTrue(defer_sleep_for_owner(cat))
+        self.assertIsNone(should_auto_sleep(cat))
+
+    def test_extreme_exhaustion_overrides_sleep_resistance(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 5
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertTrue(defer_sleep_for_owner(cat))
+        self.assertEqual(should_auto_sleep(cat), "main")
+
+    def test_auto_nap_is_short_and_has_cooldown(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 50
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertEqual(should_auto_sleep(cat), "nap")
+        minutes = start_sleep(cat, kind_override="nap")
+        self.assertGreaterEqual(minutes, 10)
+        self.assertLessEqual(minutes, 25)
+
+    def test_play_and_walk_only_nudge_sleep_pressure(self) -> None:
+        play_cat = old_cat(0)
+        play_cat["rest_level"] = 80
+        play_cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        play_cat["boredom"] = 60
+        before_play = sleep_need_percent(play_cat)
+        apply_care_effects(play_cat, "play")
+        self.assertGreaterEqual(play_cat["rest_level"], before_play - 2)
+
+        walk_cat = old_cat(0)
+        walk_cat["rest_level"] = 80
+        walk_cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        walk_cat["boredom"] = 60
+        before_walk = sleep_need_percent(walk_cat)
+        apply_care_effects(walk_cat, "walk")
+        self.assertGreaterEqual(walk_cat["rest_level"], before_walk - 3)
+
+    def test_natural_wake_solo_play_costs_only_a_little_love(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["love_bar"] = 80
+        cat["boredom"] = 30
+        cat["happiness"] = 70
+        cat["rest_level"] = 90
+        cat["rest_updated_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=1)).isoformat()
+        cat["sleep_until"] = (now - timedelta(seconds=1)).isoformat()
+        cat["sleep_kind"] = "nap"
+        self.assertTrue(finish_sleep(cat))
+        self.assertEqual(cat["love_bar"], 79)
+        self.assertLess(cat["boredom"], 30)
+        self.assertGreater(cat["happiness"], 70)
+        self.assertIsNotNone(cat.get("last_solo_play_at"))
 
 if __name__ == "__main__":
     unittest.main()
