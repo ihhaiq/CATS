@@ -61,7 +61,7 @@ async def build_rich_card(
             media_item = InputRichMessageMedia(id="cat_photo", media=media)
             media_list.append(media_item)
             media_markup = '<img src="tg://photo?id=cat_photo"/>'
-    else:
+    elif cat.get("breed") != "black":
         media_markup = "<p>الصورة الواقعية ستظهر بعد إضافة ملف القطة.</p>"
 
     sleeping = is_sleeping(cat)
