@@ -112,6 +112,11 @@ async def resolve_cat_media(
     breed = str(cat.get("breed") or "")
     age_stage = get_age_stage(cat.get("age_days", 30))
 
+    # صور القطة السوداء معطلة مؤقتًا إلى أن يتم استبدال المكتبة الحالية.
+    # نوقف كل المصادر (local/cache/override/legacy) حتى لا تظهر الصور القديمة.
+    if breed == "black":
+        return None
+
     override = await get_media_override(visual_state, breed, age_stage)
     if override:
         return ResolvedCatMedia(
