@@ -7,6 +7,7 @@ from aiogram.types import (
     InputRichMessageMedia,
 )
 
+from bot.services.economy import ACTIVE_BREEDS
 from bot.services.local_store import (
     collect_needs,
     fullness_percent,
@@ -79,6 +80,16 @@ async def build_rich_card(
         sleep_note = ""
     notice = cat.get("action_notice", "")
     notice_html = f"<p><b>{html.escape(str(notice))}</b></p>" if notice else ""
+    breed_notice_html = (
+        "<h3>⚠️ سلالة قطتك معطلة مؤقتًا من التبنّي الجديد، "
+        "لكن قطتك تستمر وتشتغل بشكل طبيعي.</h3>"
+        "<tg-button-row align=\"center\">"
+        "<tg-button type=\"callback_data\" style=\"secondary\" "
+        "data=\"cat:breed:choose\">تغيير</tg-button>"
+        "</tg-button-row>"
+        if cat.get("breed") not in ACTIVE_BREEDS
+        else ""
+    )
     hunger = int(cat.get("hunger", 20))
     happiness = int(cat.get("happiness", 100))
     love = int(cat.get("love_bar", 100))
@@ -393,6 +404,7 @@ async def build_rich_card(
     html_markup = f"""
 <h2>{html.escape(str(cat['name']))}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}</p>
+{breed_notice_html}
 <hr/>
 {media_markup}
 <hr/>
