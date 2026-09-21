@@ -22,7 +22,7 @@ from bot.services.local_store import (
     care_reward_points,
     ensure_user,
     defer_sleep_for_owner,
-   finish_sleep,
+    finish_sleep,
     get_cat_by_id,
     get_user_cat,
     get_user_points,
