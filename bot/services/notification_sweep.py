@@ -20,7 +20,10 @@ from bot.services.local_store import (
    get_cat_by_id,
    is_sleeping,
    notification_gap_seconds,
+   should_auto_sleep,
+   sleep_duration_text,
    sleep_ready_to_finish,
+   start_sleep,
    update_cat,
    user_action_lock,
 )
@@ -121,9 +124,17 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
 
    kind = cat.get("wake_notice_kind")
    if kind == "nap":
-      message = "استيقظت قطتك 🐈\n💤 خلصت قيلولتها وصحت من نفسها."
+      message = (
+         "استيقظت قطتك 🐈\n"
+         "💤 خلصت قيلولتها وصحت من نفسها.\n"
+         "🎾 لعبت شوي وحدها لأنك مو يمها وافتقدتك."
+      )
    else:
-      message = "استيقظت قطتك 🐈\n😺 شبعت نوم وصحت من نفسها."
+      message = (
+         "استيقظت قطتك 🐈\n"
+         "😺 شبعت نوم وصحت من نفسها.\n"
+         "🎾 لعبت شوي وحدها لأنك مو يمها وافتقدتك."
+      )
 
    recipients = {cat["owner_id"], cat.get("partner_id")} - {None}
    sent_to = {
@@ -138,7 +149,7 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
             user_id,
             message,
             [],
-            visual_state="idle",
+            visual_state="play",
          )
          sent_to.add(user_id)
       except Exception as exc:
@@ -228,6 +239,42 @@ async def _sweep(bot: Bot) -> None:
             await _send_wake_notice(bot, cat)
 
             sleeping = is_sleeping(cat)
+            if not sleeping:
+               auto_kind = should_auto_sleep(cat)
+               if auto_kind:
+                  minutes = start_sleep(cat, kind_override=auto_kind)
+                  duration = sleep_duration_text(minutes)
+                  if auto_kind == "nap":
+                     message = (
+                        "😴 قطتك نعست وراحت تاخذ قيلولة قصيرة من نفسها.\n"
+                        f"💤 تقريباً {duration}."
+                     )
+                  else:
+                     message = (
+                        "😴 قطتك تعبت وراحت تنام من نفسها.\n"
+                        f"💤 تقريباً {duration} حتى تشبع نوم."
+                     )
+                  for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
+                     try:
+                        await _send_need_notice(
+                           bot,
+                           cat,
+                           user_id,
+                           message,
+                           [],
+                           visual_state="sleep",
+                        )
+                     except Exception as exc:
+                        logger.warning(
+                           "Failed to send auto-sleep notice user_id=%s: %s",
+                           user_id,
+                           exc,
+                        )
+                  cat["last_notified_state"] = None
+                  cat["last_notified_at"] = None
+                  await update_cat(cat)
+                  continue
+
             needs = collect_needs(cat)
             if sleeping:
                # Sleeping suppresses routine activity reminders, not emergencies.
