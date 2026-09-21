@@ -92,8 +92,9 @@ def sleep_duration_text(minutes: int) -> str:
     return f"{hours} ساعة"
 
 
-REST_FALL_PER_AWAKE_HOUR = 8.0
-REST_RECOVERY_PER_SLEEP_HOUR = 10.0
+# Sleep pressure is primarily time-based. Care actions only nudge it slightly.
+REST_FALL_PER_AWAKE_HOUR = 4.0
+REST_RECOVERY_PER_SLEEP_HOUR = 14.0
 HUNGER_RISE_PER_AWAKE_HOUR = 3.0
 HUNGER_RISE_PER_SLEEP_HOUR = 1.0
 BOREDOM_RISE_PER_AWAKE_HOUR = 1.5
@@ -107,11 +108,18 @@ WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
 CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
 HEALTHY_SLEEP_HOURS = 16.0
-MAIN_SLEEP_REST_THRESHOLD = 35
-MAIN_SLEEP_MIN_HOURS = 4.0
-MAIN_SLEEP_MAX_HOURS = 12.5
-NAP_MIN_HOURS = 0.75
-NAP_MAX_HOURS = 2.5
+MAIN_SLEEP_REST_THRESHOLD = 28
+MAIN_SLEEP_MIN_HOURS = 3.0
+MAIN_SLEEP_MAX_HOURS = 7.5
+NAP_MIN_HOURS = 10 / 60
+NAP_MAX_HOURS = 25 / 60
+AUTO_NAP_REST_THRESHOLD = 55
+FORCE_SLEEP_REST_THRESHOLD = 8
+NAP_COOLDOWN_HOURS = 6.0
+OWNER_SLEEP_RESIST_MINUTES = 30
+SOLO_WAKE_LOVE_PENALTY = 1
+SOLO_WAKE_BOREDOM_RELIEF = 8
+SOLO_WAKE_HAPPINESS_GAIN = 3
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -243,6 +251,68 @@ def sleep_need_percent(cat: dict) -> int:
     return _refresh_rest(cat)
 
 
+def defer_sleep_for_owner(
+    cat: dict,
+    moment: datetime | None = None,
+    minutes: int = OWNER_SLEEP_RESIST_MINUTES,
+) -> bool:
+    """Let a tired awake cat resist sleep briefly while its owner is interacting."""
+    now = moment or datetime.utcnow()
+    if is_sleeping(cat):
+        return False
+    rest = _refresh_rest(cat, now)
+    if rest > AUTO_NAP_REST_THRESHOLD:
+        return False
+    cat["sleep_resist_until"] = (
+        now + timedelta(minutes=max(1, int(minutes)))
+    ).isoformat()
+    return True
+
+
+def sleep_is_deferred_for_owner(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    until = cat.get("sleep_resist_until")
+    if not until:
+        return False
+    now = moment or datetime.utcnow()
+    try:
+        return parse_time(until) > now
+    except (TypeError, ValueError):
+        cat.pop("sleep_resist_until", None)
+        return False
+
+
+def should_auto_sleep(
+    cat: dict,
+    moment: datetime | None = None,
+) -> str | None:
+    """Return main/nap when the cat should fall asleep without owner input."""
+    now = moment or datetime.utcnow()
+    if is_sleeping(cat):
+        return None
+
+    rest = _refresh_rest(cat, now)
+    if rest <= FORCE_SLEEP_REST_THRESHOLD:
+        return "main"
+    if sleep_is_deferred_for_owner(cat, now):
+        return None
+    if rest <= MAIN_SLEEP_REST_THRESHOLD:
+        return "main"
+    if rest > AUTO_NAP_REST_THRESHOLD:
+        return None
+
+    last_nap = cat.get("last_nap_at")
+    if last_nap:
+        try:
+            if (now - parse_time(last_nap)).total_seconds() < NAP_COOLDOWN_HOURS * 3600:
+                return None
+        except (TypeError, ValueError):
+            pass
+    return "nap"
+
+
 def fullness_percent(cat: dict) -> int:
     """User-facing fullness: 100 = full, 0 = starving."""
     return max(0, min(100, 100 - int(cat.get("hunger", 20))))
@@ -289,9 +359,17 @@ def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
     return kind, hours
 
 
-def start_sleep(cat: dict) -> int:
+def start_sleep(cat: dict, kind_override: str | None = None) -> int:
     now = datetime.utcnow()
     kind, hours = sleep_plan(cat, now)
+    if kind_override in {"main", "nap"} and kind_override != kind:
+        kind = kind_override
+        if kind == "nap":
+            deficit_hours = max(NAP_MIN_HOURS, (100 - _refresh_rest(cat, now)) / REST_RECOVERY_PER_SLEEP_HOUR)
+            hours = min(NAP_MAX_HOURS, max(NAP_MIN_HOURS, deficit_hours))
+        else:
+            deficit_hours = max(MAIN_SLEEP_MIN_HOURS, (100 - _refresh_rest(cat, now)) / REST_RECOVERY_PER_SLEEP_HOUR)
+            hours = min(MAIN_SLEEP_MAX_HOURS, deficit_hours)
 
     # Starting a new session means any older undelivered wake event is stale.
     cat.pop("wake_notice_pending", None)
@@ -304,6 +382,7 @@ def start_sleep(cat: dict) -> int:
     cat["sleep_planned_hours"] = hours
     cat["sleep_kind"] = kind
     cat["rest_updated_at"] = now.isoformat()
+    cat.pop("sleep_resist_until", None)
     return round(hours * 60)
 
 
@@ -326,8 +405,8 @@ def sleep_ready_to_finish(
     return _refresh_rest(probe, now) >= 98
 
 
-def finish_sleep(cat: dict) -> bool:
-    """Finish naps on time; main sleep ends only when the cat is actually rested."""
+def finish_sleep(cat: dict, *, owner_present: bool = False) -> bool:
+    """Finish sleep and model a small solo-play period when nobody is around."""
     if not sleep_ready_to_finish(cat):
         return False
 
@@ -335,30 +414,34 @@ def finish_sleep(cat: dict) -> bool:
     rest = _refresh_rest(cat, now)
 
     if cat.get("sleep_kind") == "main":
-        if rest < 98:
-            # Hunger can become severe during a long sleep and slow recovery.
-            # Extend the session from the current state instead of waking a
-            # still-tired cat just because the original estimate expired.
-            recovery = REST_RECOVERY_PER_SLEEP_HOUR
-            if int(cat.get("hunger", 20)) >= 85:
-                recovery *= 0.8
-            extra_hours = max(0.25, (98 - rest) / recovery)
-            cat["sleep_until"] = (
-                now + timedelta(hours=extra_hours)
-            ).isoformat()
-            cat["sleep_planned_hours"] = (
-                float(cat.get("sleep_planned_hours", 0.0)) + extra_hours
-            )
-            cat["rest_updated_at"] = now.isoformat()
-            return False
-
-        # Main sleep may finish before the original estimate once rest is full.
+        # Never extend a session beyond its planned end. It may wake early when
+        # fully rested, but the configured maximum remains a hard cap.
         cat["sleep_until"] = now.isoformat()
 
     _commit_sleep_today(cat, now)
 
     kind = cat.get("sleep_kind") or "sleep"
     cat["last_sleep_kind"] = kind
+    if kind == "nap":
+        cat["last_nap_at"] = now.isoformat()
+    elif kind == "main":
+        cat["last_main_sleep_at"] = now.isoformat()
+
+    if not owner_present:
+        cat["last_solo_play_at"] = now.isoformat()
+        cat["boredom"] = max(
+            0,
+            int(cat.get("boredom", 10)) - SOLO_WAKE_BOREDOM_RELIEF,
+        )
+        cat["happiness"] = min(
+            100,
+            int(cat.get("happiness", 100)) + SOLO_WAKE_HAPPINESS_GAIN,
+        )
+        cat["love_bar"] = max(
+            0,
+            int(cat.get("love_bar", 100)) - SOLO_WAKE_LOVE_PENALTY,
+        )
+        sync_decay_accumulators(cat)
     cat["wake_notice_pending"] = True
     cat["wake_notice_kind"] = kind
     cat["wake_notice_at"] = now.isoformat()
@@ -739,7 +822,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
         else:
             cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + (7 if meaningful else 3))
-        cat["rest_level"] = max(0, rest_before - (7 if meaningful else 3))
+        cat["rest_level"] = max(0, rest_before - (2 if meaningful else 1))
 
     elif action == "toy":
         meaningful = (
@@ -762,7 +845,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
         cat["love_bar"] = min(100, love_before + love_gain)
         cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + (4 if meaningful else 2))
-        cat["rest_level"] = max(0, rest_before - (4 if meaningful else 2))
+        cat["rest_level"] = max(0, rest_before - (1 if meaningful else 0))
         cat["last_social_at"] = moment.isoformat()
 
     elif action == "walk":
@@ -789,7 +872,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
         cat["love_bar"] = min(100, love_before + love_gain)
         cat["boredom"] = max(0, min(100, boredom + boredom_delta))
         cat["hunger"] = min(100, hunger_before + (10 if meaningful else 4))
-        cat["rest_level"] = max(0, rest_before - (12 if meaningful else 5))
+        cat["rest_level"] = max(0, rest_before - (3 if meaningful else 1))
 
     elif action == "talk":
         meaningful = (
@@ -952,8 +1035,6 @@ def action_block_reason(cat: dict, action: str) -> str | None:
     if action in {"play", "walk", "toy"}:
         if hunger >= 90:
             return "starving"
-        if sleep_need_percent(cat) <= 30:
-            return "tired"
     return None
 
 

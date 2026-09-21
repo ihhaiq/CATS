@@ -20,6 +20,7 @@ from bot.services.local_store import (
     care_reward_points,
     create_cat,
     ensure_user,
+    defer_sleep_for_owner,
     finish_sleep,
     fullness_percent,
     get_latest_cat_for_user,
@@ -321,7 +322,7 @@ async def _guest_message_locked(message: Message) -> None:
             title = "لا توجد قطة"
         else:
             apply_decay(cat)
-            woke = finish_sleep(cat)
+            woke = finish_sleep(cat, owner_present=True)
             await update_cat(cat)
             if cat.get("is_fled"):
                 result = InlineQueryResultArticle(
@@ -372,6 +373,9 @@ async def _guest_message_locked(message: Message) -> None:
                     )
                     await message.bot.answer_guest_query(message.guest_query_id, result)
                     return
+
+                if action in {"play", "toy", "walk", "talk", "relax"}:
+                    defer_sleep_for_owner(cat)
 
                 block_reason = action_block_reason(cat, action)
                 if block_reason:

@@ -39,7 +39,7 @@ async def _cmd_status_locked(message: Message, user_id: int) -> None:
     await message.answer("ما عندك قطة. استخدم /adopt اسم_القطة أولاً.")
     return
   apply_decay(cat)
-  finish_sleep(cat)
+  finish_sleep(cat, owner_present=True)
   if cat.get("is_fled"):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")

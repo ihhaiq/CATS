@@ -21,6 +21,7 @@ from bot.services.local_store import (
     can_bypass_action_cooldown,
     care_reward_points,
     ensure_user,
+    defer_sleep_for_owner,
     finish_sleep,
     get_cat_by_id,
     get_user_cat,
@@ -183,7 +184,7 @@ async def _handle_rich_action_locked(
     # Any new action invalidates an older temporary notice/task.
     clear_action_notice(cat)
     apply_decay(cat)
-    woke = finish_sleep(cat)
+    woke = finish_sleep(cat, owner_present=True)
     if cat.get("is_fled"):
         await update_cat(cat)
         await _edit_card(query, build_fled_card(cat))
@@ -223,6 +224,9 @@ async def _handle_rich_action_locked(
             show_alert=True,
         )
         return
+
+    if action in {"play", "toy", "walk", "talk", "relax"}:
+        defer_sleep_for_owner(cat)
 
     block_reason = action_block_reason(cat, action)
     if block_reason:
