@@ -132,7 +132,14 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
    }
    for user_id in recipients - sent_to:
       try:
-         await bot.send_message(user_id, message)
+         await _send_need_notice(
+            bot,
+            cat,
+            user_id,
+            message,
+            [],
+            visual_state="idle",
+         )
          sent_to.add(user_id)
       except Exception as exc:
          logger.warning("Failed to send wake notice user_id=%s: %s", user_id, exc)
