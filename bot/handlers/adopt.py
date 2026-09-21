@@ -64,7 +64,7 @@ def _adopted_card(
     "<tg-button-row align=\"center\">"
     "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:breed\">🐱 تغيير القطة إلى Siamese</tg-button>"
     "</tg-button-row>"
-    if show_breed_notice
+    if show_breed_notice and cat.get("breed") != ACTIVE_BREED
     else ""
   )
   return InputRichMessage(
@@ -244,6 +244,10 @@ async def cb_change_breed(query: CallbackQuery) -> None:
     cat = await get_user_cat(user_id)
     if cat is None:
       await query.answer("ما عندك قطة بعد.", show_alert=True)
+      return
+
+    if cat.get("breed") == ACTIVE_BREED:
+      await query.answer("قطتك من نوع Siamese بالفعل.")
       return
 
     cat["breed"] = ACTIVE_BREED
