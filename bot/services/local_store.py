@@ -414,24 +414,8 @@ def finish_sleep(cat: dict, *, owner_present: bool = False) -> bool:
     rest = _refresh_rest(cat, now)
 
     if cat.get("sleep_kind") == "main":
-        if rest < 98:
-            # Hunger can become severe during a long sleep and slow recovery.
-            # Extend the session from the current state instead of waking a
-            # still-tired cat just because the original estimate expired.
-            recovery = REST_RECOVERY_PER_SLEEP_HOUR
-            if int(cat.get("hunger", 20)) >= 85:
-                recovery *= 0.8
-            extra_hours = max(0.25, (98 - rest) / recovery)
-            cat["sleep_until"] = (
-                now + timedelta(hours=extra_hours)
-            ).isoformat()
-            cat["sleep_planned_hours"] = (
-                float(cat.get("sleep_planned_hours", 0.0)) + extra_hours
-            )
-            cat["rest_updated_at"] = now.isoformat()
-            return False
-
-        # Main sleep may finish before the original estimate once rest is full.
+        # Never extend a session beyond its planned end. It may wake early when
+        # fully rested, but the configured maximum remains a hard cap.
         cat["sleep_until"] = now.isoformat()
 
     _commit_sleep_today(cat, now)
