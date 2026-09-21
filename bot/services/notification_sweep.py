@@ -60,9 +60,10 @@ async def _send_need_notice(
    user_id: int,
    message: str,
    needs: list[str],
+   visual_state: str | None = None,
 ) -> None:
-   """Send a needs notification with the best available cat asset."""
-   visual_state = _notification_visual_state(needs)
+   """Send a notification with the best available cat asset."""
+   visual_state = visual_state or _notification_visual_state(needs)
    try:
       resolved = await resolve_cat_media(
          bot,
@@ -151,7 +152,14 @@ async def _send_fled_notice(bot: Bot, cat: dict) -> None:
    message = "💨 قطتك هربت بسبب الإهمال."
    for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
       try:
-         await bot.send_message(user_id, message)
+         await _send_need_notice(
+            bot,
+            cat,
+            user_id,
+            message,
+            [],
+            visual_state="angry",
+         )
       except Exception as exc:
          logger.warning("Failed to send flee notice user_id=%s: %s", user_id, exc)
 
