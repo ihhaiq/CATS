@@ -5,6 +5,10 @@ from datetime import datetime
 from bot.services.cat_assets import BREED_POOL
 
 
+# Temporarily enabled until the remaining breed assets are ready.
+ACTIVE_BREED = "siamese"
+
+
 def check_cooldown(
     last_action_time: datetime,
     cooldown_seconds: int,
@@ -15,4 +19,5 @@ def check_cooldown(
 
 
 def assign_random_breed() -> str:
-    return random.choice(BREED_POOL)
+    # Keep BREED_POOL intact for the future multi-breed rollout.
+  return ACTIVE_BREED
