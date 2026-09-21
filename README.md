@@ -109,4 +109,4 @@ python -m unittest discover -s tests -p "test_*.py"
 
 ## Temporary breed rollout
 
-The multi-breed system and all breed code remain in the repository, but additional breeds are temporarily disabled because completing the required image library would require a large number of images. New adoptions currently receive `siamese` automatically. Existing owners can use the breed-change notice to switch their cat to `siamese`.
+The multi-breed system and all breed code remain in the repository, but breeds without a complete image set are temporarily disabled. New adoptions currently choose between `siamese` and `black`. Existing owners on a disabled breed can keep their current cat or use the breed-change notice to switch to either active breed.
