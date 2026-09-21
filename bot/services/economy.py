@@ -5,7 +5,11 @@ from bot.services.cat_assets import BREED_POOL
 
 
 # Temporarily enabled until the remaining breed assets are ready.
-ACTIVE_BREED = "siamese"
+ACTIVE_BREEDS: tuple[str, ...] = ("siamese", "black")
+DEFAULT_ACTIVE_BREED = "siamese"
+
+# Backward-compatible alias for code that still expects one default breed.
+ACTIVE_BREED = DEFAULT_ACTIVE_BREED
 
 
 def check_cooldown(
@@ -17,6 +21,10 @@ def check_cooldown(
     return remaining <= 0, max(0, int(remaining))
 
 
+def is_active_breed(breed: str | None) -> bool:
+    return bool(breed and breed in ACTIVE_BREEDS)
+
+
 def assign_random_breed() -> str:
     # Keep BREED_POOL intact for the future multi-breed rollout.
-    return ACTIVE_BREED
+    return DEFAULT_ACTIVE_BREED
