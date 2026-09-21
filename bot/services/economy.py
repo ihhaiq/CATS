@@ -19,4 +19,4 @@ def check_cooldown(
 
 def assign_random_breed() -> str:
     # Keep BREED_POOL intact for the future multi-breed rollout.
-  return ACTIVE_BREED
+    return ACTIVE_BREED
