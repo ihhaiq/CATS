@@ -9,12 +9,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputRichMessage, Message
 
-from bot.services.economy import assign_random_breed
+from bot.services.economy import assign_random_breed, ACTIVE_BREED
 from bot.services.local_store import (
   create_cat,
   ensure_user,
   get_user_cat,
   now_iso,
+  update_cat,
   user_action_lock,
 )
 
@@ -46,6 +47,7 @@ def _adopted_card(
   cat: dict,
   *,
   newly_adopted: bool = True,
+  show_breed_notice: bool = False,
 ) -> InputRichMessage:
   heading = (
     f"🐾 تم تبني {html.escape(str(cat['name']))}!"
@@ -57,11 +59,20 @@ def _adopted_card(
     if cat.get("cat_id")
     else "cat:status"
   )
+  breed_notice = (
+    "<p>🐾 تگدر تغيّر قطتك إلى نوع آخر، والنوع المتاح حاليًا هو Siamese فقط.</p>"
+    "<tg-button-row align=\"center\">"
+    "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:breed\">🐱 تغيير القطة إلى Siamese</tg-button>"
+    "</tg-button-row>"
+    if show_breed_notice
+    else ""
+  )
   return InputRichMessage(
     html=f"""
 <h2>{heading}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))}</p>
 <p>رقمها: #{html.escape(str(cat['id_number']))}</p>
+{breed_notice}
 <tg-button-row align="center">
 <tg-button type="callback_data" style="primary" data="{status_data}">عرض القطة</tg-button>
 </tg-button-row>
@@ -78,7 +89,11 @@ async def _send_adopted(
 ) -> None:
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
-    rich_message=_adopted_card(cat, newly_adopted=newly_adopted),
+    rich_message=_adopted_card(
+      cat,
+      newly_adopted=newly_adopted,
+      show_breed_notice=not newly_adopted,
+    ),
   )
 
 
@@ -140,7 +155,11 @@ async def cmd_start(message: Message) -> None:
   if cat is not None:
     await message.bot.send_rich_message(
       chat_id=message.chat.id,
-      rich_message=_adopted_card(cat, newly_adopted=False),
+      rich_message=_adopted_card(
+        cat,
+        newly_adopted=False,
+        show_breed_notice=True,
+      ),
     )
     return
   await message.answer(
@@ -214,3 +233,22 @@ async def cmd_adopt(message: Message) -> None:
 
   cat, created = await _get_or_create_cat(user_id, name)
   await _send_adopted(message, cat, newly_adopted=created)
+
+
+@router.callback_query(F.data == "cat:breed")
+async def cb_change_breed(query: CallbackQuery) -> None:
+  """Allow an existing owner to switch to the only active breed."""
+  user_id = query.from_user.id
+  async with user_action_lock(user_id):
+    await ensure_user(user_id)
+    cat = await get_user_cat(user_id)
+    if cat is None:
+      await query.answer("ما عندك قطة بعد.", show_alert=True)
+      return
+
+    cat["breed"] = ACTIVE_BREED
+    await update_cat(cat)
+
+  await query.answer("🐱 تغيّرت قطتك إلى Siamese.")
+  if query.message:
+    await _send_adopted(query.message, cat, newly_adopted=False)
