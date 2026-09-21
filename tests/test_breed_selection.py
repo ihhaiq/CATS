@@ -1,7 +1,7 @@
 """Checks for temporary breed selection UI and rules."""
 import unittest
 
-from bot.handlers.adopt import _adopted_card, _breed_keyboard
+from bot.handlers.adopt import _adopted_card, _breed_change_card, _breed_keyboard
 from bot.services.economy import ACTIVE_BREEDS
 
 
@@ -21,7 +21,7 @@ class BreedSelectionTests(unittest.TestCase):
             {"adopt:breed:siamese", "adopt:breed:black"},
         )
 
-    def test_disabled_breed_notice_offers_both_choices(self) -> None:
+    def test_disabled_breed_notice_keeps_cat_and_offers_change(self) -> None:
         cat = {
             "cat_id": 7,
             "name": "قديم",
@@ -33,9 +33,17 @@ class BreedSelectionTests(unittest.TestCase):
             newly_adopted=False,
             show_breed_notice=True,
         )
-        self.assertIn('data="cat:breed:siamese"', card.html)
-        self.assertIn('data="cat:breed:black"', card.html)
-        self.assertIn("معطلة مؤقتًا", card.html)
+        self.assertIn("<h3>", card.html)
+        self.assertIn("تستمر وتشتغل بشكل طبيعي", card.html)
+        self.assertIn('data="cat:breed:choose"', card.html)
+        self.assertIn(">تغيير</tg-button>", card.html)
+        self.assertNotIn('data="cat:breed:siamese"', card.html)
+        self.assertNotIn('data="cat:breed:black"', card.html)
+
+        chooser = _breed_change_card(cat)
+        self.assertIn('data="cat:breed:siamese"', chooser.html)
+        self.assertIn('data="cat:breed:black"', chooser.html)
+        self.assertIn("التغيير اختياري", chooser.html)
 
     def test_active_breed_does_not_show_disabled_notice(self) -> None:
         for breed in ACTIVE_BREEDS:
@@ -51,8 +59,8 @@ class BreedSelectionTests(unittest.TestCase):
                     newly_adopted=False,
                     show_breed_notice=True,
                 )
-                self.assertNotIn("cat:breed:siamese", card.html)
-                self.assertNotIn("cat:breed:black", card.html)
+                self.assertNotIn("cat:breed:choose", card.html)
+                self.assertNotIn("معطلة مؤقتًا", card.html)
 
 
 if __name__ == "__main__":
