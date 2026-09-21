@@ -135,3 +135,8 @@ The runtime test command expects these official files:
 
 After deploy, run `/dev_media_test` as an admin to exercise all four through
 the same Rich Message path used by the bot.
+
+
+## دليل الرسم والحالات
+
+للتفاصيل الكاملة عن هوية القطة، الوضعيات، الحالات، الصور الموجودة والناقصة، راجع [CAT_ART_GUIDE.md](CAT_ART_GUIDE.md).
