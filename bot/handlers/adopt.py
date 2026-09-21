@@ -70,6 +70,22 @@ def _breed_label(breed: str) -> str:
   return _BREED_LABELS.get(breed, breed)
 
 
+def _breed_change_card(cat: dict) -> InputRichMessage:
+  current = html.escape(_breed_label(str(cat.get("breed") or "")))
+  return InputRichMessage(
+    html=f"""
+<h2>🐾 تغيير سلالة القطة</h2>
+<p>السلالة الحالية: <b>{current}</b></p>
+<p>التغيير اختياري. إذا ما تريد تغيّرها، تبقى قطتك الحالية وتستمر بشكل طبيعي.</p>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="secondary" data="cat:breed:siamese">🐱 Siamese</tg-button>
+<tg-button type="callback_data" style="secondary" data="cat:breed:black">🐈‍⬛ سوداء</tg-button>
+</tg-button-row>
+""".strip(),
+    is_rtl=True,
+  )
+
+
 def _adopted_card(
   cat: dict,
   *,
@@ -87,11 +103,10 @@ def _adopted_card(
     else "cat:status"
   )
   breed_notice = (
-    "<p>🐾 سلالة قطتك الحالية معطلة مؤقتًا من التبنّي الجديد. "
-    "تگدر تخليها مثل ما هي، أو تغيّرها إلى أحد النوعين المتاحين:</p>"
+    "<h3>⚠️ سلالة قطتك معطلة مؤقتًا من التبنّي الجديد، "
+    "لكن قطتك تستمر وتشتغل بشكل طبيعي.</h3>"
     "<tg-button-row align=\"center\">"
-    "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:breed:siamese\">🐱 Siamese</tg-button>"
-    "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:breed:black\">🐈‍⬛ سوداء</tg-button>"
+    "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:breed:choose\">تغيير</tg-button>"
     "</tg-button-row>"
     if show_breed_notice and cat.get("breed") not in ACTIVE_BREEDS
     else ""
@@ -343,13 +358,30 @@ async def cmd_adopt(message: Message, state: FSMContext) -> None:
   )
 
 
-@router.callback_query(F.data.startswith("cat:breed:"))
+@router.callback_query(F.data == "cat:breed:choose")
+async def cb_choose_breed(query: CallbackQuery) -> None:
+  """Open the optional breed switcher for an existing cat."""
+  user_id = query.from_user.id
+  await ensure_user(user_id)
+  cat = await get_user_cat(user_id)
+  if cat is None:
+    await query.answer("ما عندك قطة بعد.", show_alert=True)
+    return
+
+  await query.answer()
+  if query.message:
+    await query.message.bot.send_rich_message(
+      chat_id=query.message.chat.id,
+      rich_message=_breed_change_card(cat),
+    )
+
+
+@router.callback_query(
+  F.data.in_({"cat:breed:siamese", "cat:breed:black"})
+)
 async def cb_change_breed(query: CallbackQuery) -> None:
   """Allow an existing owner to switch to one of the active breeds."""
   breed = (query.data or "").rsplit(":", maxsplit=1)[-1]
-  if breed not in ACTIVE_BREEDS:
-    await query.answer("هذا النوع مو متاح حاليًا.", show_alert=True)
-    return
 
   user_id = query.from_user.id
   async with user_action_lock(user_id):
