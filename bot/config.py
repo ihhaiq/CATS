@@ -31,6 +31,7 @@ class Settings:
     admin_ids: list[int] | None = None
 
     feed_cooldown: int = 15 * 60
+    treat_cooldown: int = 30 * 60
     play_cooldown: int = 15 * 60
     toy_cooldown: int = 15 * 60
     walk_cooldown: int = 4 * 60 * 60
