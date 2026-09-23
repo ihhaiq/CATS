@@ -21,6 +21,10 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_ready_to_finish,
     start_sleep,
+    stubborn_care_refusal_reason,
+    stubborn_refusal_text,
+    stubbornly_refuses_sleep,
+    stubbornly_refuses_wake,
     wake_now,
 )
 
@@ -525,6 +529,14 @@ class CoupledNeedsTests(unittest.TestCase):
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
 
+    def test_feed_at_seventy_percent_fullness_is_meaningful(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 30
+        apply_care_effects(cat, "feed")
+        self.assertTrue(cat["last_care_meaningful"])
+        self.assertEqual(cat["hunger"], 0)
+        self.assertGreater(care_reward_points(cat, "feed"), 0)
+
     def test_optional_care_without_real_need_has_no_reward(self) -> None:
         cat = old_cat(0)
         cat["happiness"] = 100
@@ -608,6 +620,72 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertIn("walk_due", needs)
         self.assertIn("very_sad", needs)
 
+
+    def test_bad_counters_can_make_care_actions_stubborn(self) -> None:
+        cases = (
+            ("love_bar", 20, "feed", "love"),
+            ("trust", 20, "feed", "trust"),
+            ("happiness", 20, "feed", "happiness"),
+            ("rest_level", 20, "feed", "rest"),
+            ("hunger", 90, "talk", "hunger"),
+            ("boredom", 90, "relax", "boredom"),
+        )
+        for field, value, action, expected in cases:
+            with self.subTest(field=field, action=action):
+                cat = old_cat(0)
+                cat[field] = value
+                if field == "rest_level":
+                    cat["rest_updated_at"] = datetime.utcnow().isoformat()
+                self.assertEqual(
+                    stubborn_care_refusal_reason(cat, action, roll=0.0),
+                    expected,
+                )
+
+    def test_stubborn_care_does_not_lock_recovery_actions(self) -> None:
+        healthy = old_cat(0)
+        self.assertIsNone(
+            stubborn_care_refusal_reason(healthy, "feed", roll=0.0)
+        )
+
+        hungry = old_cat(0)
+        hungry["hunger"] = 95
+        self.assertIsNone(
+            stubborn_care_refusal_reason(hungry, "feed", roll=0.0)
+        )
+
+        tired = old_cat(0)
+        tired["rest_level"] = 20
+        tired["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertIsNone(
+            stubborn_care_refusal_reason(tired, "relax", roll=0.0)
+        )
+
+    def test_stubborn_care_is_probabilistic_and_explained(self) -> None:
+        cat = old_cat(0)
+        cat["love_bar"] = 20
+        self.assertEqual(
+            stubborn_care_refusal_reason(cat, "feed", roll=0.29),
+            "love",
+        )
+        self.assertIsNone(
+            stubborn_care_refusal_reason(cat, "feed", roll=0.30)
+        )
+        self.assertIn(
+            "ما رضت تاكل",
+            stubborn_refusal_text("feed", "love"),
+        )
+
+    def test_manual_sleep_and_wake_can_be_stubborn(self) -> None:
+        cat = old_cat(0)
+        self.assertTrue(stubbornly_refuses_sleep(cat, roll=0.0))
+        self.assertFalse(stubbornly_refuses_sleep(cat, roll=0.99))
+
+        now = datetime.utcnow()
+        cat["sleep_started_at"] = now.isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
+        self.assertTrue(stubbornly_refuses_wake(cat, roll=0.0))
+        self.assertFalse(stubbornly_refuses_wake(cat, roll=0.99))
+        self.assertFalse(stubbornly_refuses_sleep(cat, roll=0.0))
 
     def test_owner_interaction_defers_auto_sleep(self) -> None:
         cat = old_cat(0)

@@ -95,13 +95,20 @@ class RuntimeTests(unittest.TestCase):
             "slept_today_hours": 10,
         }
         card = asyncio.run(build_rich_card(None, cat, 42))
-        self.assertIn("الشبع", card.html)
+        self.assertIn("<h1>Test</h1>", card.html)
+        self.assertIn("😋 الشبع", card.html)
         self.assertIn("الراحة", card.html)
+        self.assertIn("<footer>🐈 السلالة: black | #123456</footer>", card.html)
         self.assertIn("cat:feed", card.html)
         self.assertIn("cat:play", card.html)
         self.assertIn("cat:toy", card.html)
         self.assertIn("🧸 اعطها لعبة", card.html)
         self.assertIn("cat:relax", card.html)
+        self.assertIn("🍖 إطعام", card.html)
+        self.assertIn("🎾 لعب", card.html)
+        self.assertIn("🌿 نزهة", card.html)
+        self.assertIn("💬 تحدث", card.html)
+        self.assertIn("😴 نوم", card.html)
         self.assertIn("<th>الحالة</th><th>النسبة</th><th>ملاحظة</th>", card.html)
         self.assertIn("شبعانة", card.html)
         self.assertIn("مرتاحة ومستانسة", card.html)
@@ -155,8 +162,8 @@ class RuntimeTests(unittest.TestCase):
             "slept_today_hours": 0,
         }
         card = asyncio.run(build_rich_card(None, cat, 0))
-        self.assertIn("&lt;b&gt;Test&lt;/b&gt;", card.html)
-        self.assertNotIn("<h2><b>Test</b></h2>", card.html)
+        self.assertIn("<h1>&lt;b&gt;Test&lt;/b&gt;</h1>", card.html)
+        self.assertNotIn("<h1><b>Test</b></h1>", card.html)
 
     def test_state_note_describes_hunger_and_boredom(self) -> None:
         from datetime import datetime
@@ -299,6 +306,7 @@ class RuntimeTests(unittest.TestCase):
         }
         card = asyncio.run(build_rich_card(None, cat, 10, "sleep"))
         self.assertIn("cat:wake", card.html)
+        self.assertIn("☀️ إيقاظ", card.html)
         self.assertIn("cat:status", card.html)
         self.assertNotIn("cat:feed", card.html)
         self.assertNotIn("cat:play", card.html)

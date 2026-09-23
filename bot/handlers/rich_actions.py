@@ -32,6 +32,10 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_remaining_minutes,
     start_sleep,
+    stubborn_care_refusal_reason,
+    stubborn_refusal_text,
+    stubbornly_refuses_sleep,
+    stubbornly_refuses_wake,
     sync_decay_accumulators,
     update_cat,
     user_action_lock,
@@ -225,9 +229,6 @@ async def _handle_rich_action_locked(
         )
         return
 
-    if action in {"play", "toy", "walk", "talk", "relax"}:
-        defer_sleep_for_owner(cat)
-
     block_reason = action_block_reason(cat, action)
     if block_reason:
         await update_cat(cat)
@@ -242,6 +243,30 @@ async def _handle_rich_action_locked(
                 show_alert=True,
             )
         return
+
+    if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
+        refusal_reason = stubborn_care_refusal_reason(cat, action)
+        if refusal_reason:
+            notice_token = _set_action_notice(
+                cat,
+                stubborn_refusal_text(action, refusal_reason),
+            )
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "cat_angry_sleep",
+                ),
+            )
+            await query.answer()
+            _schedule_notice_clear(query, user_id, notice_token)
+            return
+
+    if action in {"play", "toy", "walk", "talk", "relax"}:
+        defer_sleep_for_owner(cat)
 
     media_kind = action
     notice_token: str | None = None
@@ -348,6 +373,25 @@ async def _handle_rich_action_locked(
             _schedule_notice_clear(query, user_id, notice_token)
             return
 
+        if stubbornly_refuses_sleep(cat):
+            notice_token = _set_action_notice(
+                cat,
+                "😾 عاندت وما رضت تنام هسه! جرّب وياها مرة ثانية.",
+            )
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "cat_angry_sleep",
+                ),
+            )
+            await query.answer()
+            _schedule_notice_clear(query, user_id, notice_token)
+            return
+
         planned_minutes = start_sleep(cat)
         points = 0
         media_kind = "sleep"
@@ -364,6 +408,25 @@ async def _handle_rich_action_locked(
             )
 
     elif action == "wake":
+        if stubbornly_refuses_wake(cat):
+            notice_token = _set_action_notice(
+                cat,
+                "😾 عاندت وما رضت تكعد؛ تريد تكمل نومها شوي.",
+            )
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "cat_angry_sleep",
+                ),
+            )
+            await query.answer()
+            _schedule_notice_clear(query, user_id, notice_token)
+            return
+
         rest_before_wake = sleep_need_percent(cat)
         did_wake = wake_now(cat)
         if did_wake:

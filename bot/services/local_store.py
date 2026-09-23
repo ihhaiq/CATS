@@ -1,6 +1,7 @@
 """PostgreSQL-backed runtime state and cat game logic."""
 import asyncio
 import copy
+import random
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
@@ -71,6 +72,96 @@ def is_sleeping(cat: dict) -> bool:
     return bool(sleep_until and parse_time(sleep_until) > datetime.utcnow())
 
 
+def stubbornly_refuses_sleep(cat: dict, *, roll: float | None = None) -> bool:
+    """Sometimes refuse a manual sleep request for a playful stubborn moment."""
+    if is_sleeping(cat):
+        return False
+    value = random.random() if roll is None else float(roll)
+    return value < STUBBORN_SLEEP_CHANCE
+
+
+def stubbornly_refuses_wake(cat: dict, *, roll: float | None = None) -> bool:
+    """Sometimes refuse a manual wake request while an active sleep is running."""
+    if not is_sleeping(cat):
+        return False
+    value = random.random() if roll is None else float(roll)
+    return value < STUBBORN_WAKE_CHANCE
+
+
+def stubborn_care_refusal_reason(
+    cat: dict,
+    action: str,
+    *,
+    roll: float | None = None,
+) -> str | None:
+    """Return the strongest bad state behind a temporary care refusal.
+
+    Refusal is probabilistic so a neglected cat can be stubborn without
+    creating a permanent recovery deadlock. Actions that directly fix a
+    physical need are not penalized by that same need.
+    """
+    if action not in {"feed", "play", "toy", "walk", "talk", "relax"}:
+        return None
+
+    love = int(cat.get("love_bar", 100))
+    trust = int(cat.get("trust", 60))
+    happiness = int(cat.get("happiness", 100))
+    rest = sleep_need_percent(cat)
+    hunger = int(cat.get("hunger", 20))
+    boredom = int(cat.get("boredom", 10))
+
+    candidates: list[tuple[str, float]] = []
+    if love <= 30:
+        candidates.append(("love", (30 - love) / 30))
+    if trust <= 35:
+        candidates.append(("trust", (35 - trust) / 35))
+    if happiness <= 40:
+        candidates.append(("happiness", (40 - happiness) / 40))
+    if rest <= 35 and action != "relax":
+        candidates.append(("rest", (35 - rest) / 35))
+    if hunger >= 80 and action != "feed":
+        candidates.append(("hunger", (hunger - 80) / 20))
+    if boredom >= 80 and action in {"feed", "talk", "relax"}:
+        candidates.append(("boredom", (boredom - 80) / 20))
+
+    if not candidates:
+        return None
+
+    refusal_chance = min(
+        STUBBORN_CARE_MAX_CHANCE,
+        STUBBORN_CARE_BASE_CHANCE
+        + STUBBORN_CARE_EXTRA_REASON_CHANCE * (len(candidates) - 1),
+    )
+    value = random.random() if roll is None else float(roll)
+    if value >= refusal_chance:
+        return None
+
+    return max(candidates, key=lambda item: item[1])[0]
+
+
+def stubborn_refusal_text(action: str, reason: str) -> str:
+    """Human-facing reason for a temporary stubborn care refusal."""
+    action_text = {
+        "feed": "تاكل",
+        "play": "تلعب",
+        "toy": "تاخذ اللعبة",
+        "walk": "تطلع نزهة",
+        "talk": "تحچي",
+        "relax": "تستلقي",
+    }.get(action, "تسوي هذا")
+
+    reason_text = {
+        "love": "حبها إلك نازل وتحتاج ترجع تقرّب منها شوي",
+        "trust": "ثقتها بيك قليلة وهسه مو متعاونة",
+        "happiness": "مزاجها مو زين وما إلها خلق",
+        "rest": "نعسانة وما بيها حيل",
+        "hunger": "جوعانة ومركزة على الأكل أكثر من أي شي ثاني",
+        "boredom": "ملانة حيل وما تريد هذا النشاط هسه",
+    }.get(reason, "مزاجها مو مساعد")
+
+    return f"😾 عاندت وما رضت {action_text}؛ {reason_text}."
+
+
 def sleep_remaining_minutes(cat: dict) -> int:
     sleep_until = cat.get("sleep_until")
     if not sleep_until:
@@ -120,6 +211,11 @@ OWNER_SLEEP_RESIST_MINUTES = 30
 SOLO_WAKE_LOVE_PENALTY = 1
 SOLO_WAKE_BOREDOM_RELIEF = 8
 SOLO_WAKE_HAPPINESS_GAIN = 3
+STUBBORN_SLEEP_CHANCE = 0.20
+STUBBORN_WAKE_CHANCE = 0.20
+STUBBORN_CARE_BASE_CHANCE = 0.30
+STUBBORN_CARE_EXTRA_REASON_CHANCE = 0.10
+STUBBORN_CARE_MAX_CHANCE = 0.70
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -785,7 +881,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
     meaningful = True
     if action == "feed":
-        meaningful = hunger_before >= 35
+        meaningful = hunger_before >= 30
         if meaningful:
             cat["hunger"] = max(0, hunger_before - 40)
             boredom_drop = 10
