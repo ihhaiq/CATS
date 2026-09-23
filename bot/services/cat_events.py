@@ -7,7 +7,6 @@ from datetime import datetime, timedelta
 
 from bot.services.local_store import (
     is_sleeping,
-    now_iso,
     parse_time,
     recommended_action,
     state_transaction,
@@ -267,7 +266,14 @@ def visit_eligible(cat: dict, moment: datetime | None = None) -> bool:
         return False
     if active_cat_request(cat, now):
         return False
-    return _cooldown_ready(cat.get("last_visit_at"), VISIT_COOLDOWN_HOURS, now)
+    return (
+        _cooldown_ready(cat.get("last_visit_at"), VISIT_COOLDOWN_HOURS, now)
+        and _cooldown_ready(
+            cat.get("last_visitor_at"),
+            VISIT_COOLDOWN_HOURS,
+            now,
+        )
+    )
 
 
 async def record_cat_visit(
