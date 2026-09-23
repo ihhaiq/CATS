@@ -28,6 +28,7 @@ from bot.services.local_store import (
     get_user_cat,
     get_user_points,
     is_sleeping,
+    mark_owner_interaction,
     now_iso,
     parse_time,
     sleep_duration_text,
@@ -38,6 +39,7 @@ from bot.services.local_store import (
     stubborn_refusal_text,
     stubbornly_refuses_sleep,
     stubbornly_refuses_wake,
+    TREAT_FULLNESS_THRESHOLD,
     update_cat,
     user_action_lock,
     wake_now,
@@ -64,6 +66,10 @@ _ALIASES = {
     "طعام": "feed",
     "اكل": "feed",
     "أكل": "feed",
+
+    "treat": "treat",
+    "تحلية": "treat",
+    "حلو": "treat",
 
     "play": "play",
     "لعب": "play",
@@ -116,6 +122,7 @@ _GUEST_HELP = (
     "🐾 أوامر Catibot في وضع الضيف:\n"
     "حالة / status\n"
     "إطعام / feed\n"
+    "تحلية / treat\n"
     "لعب / play\n"
     "لعبة / toy\n"
     "نزهة / walk\n"
@@ -357,7 +364,7 @@ async def _guest_message_locked(message: Message) -> None:
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
                 return
-            if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
+            if action in {"feed", "treat", "play", "toy", "walk", "talk", "relax"}:
                 if active_hiding(cat):
                     card = await _build_guest_card(
                         message,
@@ -396,6 +403,24 @@ async def _guest_message_locked(message: Message) -> None:
                             f"{sleep_duration_text(sleep_remaining_minutes(cat))}. "
                             "صحّيها أولاً حتى تتفاعل وياها."
                         ),
+                        input_message_content=InputRichMessageContent(rich_message=card),
+                    )
+                    await message.bot.answer_guest_query(message.guest_query_id, result)
+                    return
+
+                if action == "treat" and fullness_percent(cat) < TREAT_FULLNESS_THRESHOLD:
+                    await update_cat(cat)
+                    card = await _build_guest_card(
+                        message,
+                        caller,
+                        cat,
+                        await get_user_points(user_id),
+                        "status",
+                    )
+                    result = InlineQueryResultArticle(
+                        id="guest-treat-not-ready",
+                        title="🍬 التحلية مو وقتها بعد",
+                        description="تظهر من يصير الشبع 75% وفوك.",
                         input_message_content=InputRichMessageContent(rich_message=card),
                     )
                     await message.bot.answer_guest_query(message.guest_query_id, result)
@@ -451,11 +476,12 @@ async def _guest_message_locked(message: Message) -> None:
                     )
                     return
 
-                if action in {"play", "toy", "walk", "talk", "relax"}:
+                if action in {"treat", "play", "toy", "walk", "talk", "relax"}:
                     defer_sleep_for_owner(cat)
 
                 timestamp_key = {
                     "feed": "last_fed",
+                    "treat": "last_treat",
                     "play": "last_played",
                     "toy": "last_toy",
                     "walk": "last_walk",
@@ -464,6 +490,7 @@ async def _guest_message_locked(message: Message) -> None:
                 }[action]
                 cooldown = {
                     "feed": settings.feed_cooldown,
+                    "treat": settings.treat_cooldown,
                     "play": settings.play_cooldown,
                     "toy": settings.toy_cooldown,
                     "walk": settings.walk_cooldown,
@@ -493,6 +520,8 @@ async def _guest_message_locked(message: Message) -> None:
 
                 if action == "feed":
                     title = "🍖 تم الإطعام"
+                elif action == "treat":
+                    title = "تحلية 🍬"
                 elif action == "play":
                     if int(cat.get("same_action_streak", 1)) >= 5:
                         title = "😾 ملت من نفس اللعب"
@@ -548,6 +577,12 @@ async def _guest_message_locked(message: Message) -> None:
                     description = (
                         "⚡ احتاجت الفعل، لذلك تجاهلت التهدئة؛ بدون نقاط إضافية."
                     )
+                elif action == "treat":
+                    description = (
+                        "🍬 شبعت أكثر، حبها زاد هواية ومللها نزل."
+                        if not soft_interaction
+                        else "🍬 أخذت تحلية قبل شوي؛ خلي بينها وبين الثانية شوية وقت."
+                    )
                 elif action == "toy":
                     description = (
                         "🧸 اللعبة رفعت سعادتها وحبها وكسرت الملل."
@@ -579,6 +614,7 @@ async def _guest_message_locked(message: Message) -> None:
                 return
 
             elif action == "sleep":
+                mark_owner_interaction(cat)
                 card_cat = cat
                 if is_sleeping(cat):
                     title = "😴 القطة نائمة أصلًا"
@@ -626,6 +662,7 @@ async def _guest_message_locked(message: Message) -> None:
                 return
 
             elif action == "wake":
+                mark_owner_interaction(cat)
                 card_cat = cat
                 card_state = "status"
                 if is_sleeping(cat):
