@@ -378,9 +378,6 @@ async def _guest_message_locked(message: Message) -> None:
                     await message.bot.answer_guest_query(message.guest_query_id, result)
                     return
 
-                if action in {"play", "toy", "walk", "talk", "relax"}:
-                    defer_sleep_for_owner(cat)
-
                 block_reason = action_block_reason(cat, action)
                 if block_reason:
                     if block_reason == "starving":
@@ -430,6 +427,9 @@ async def _guest_message_locked(message: Message) -> None:
                         result,
                     )
                     return
+
+                if action in {"play", "toy", "walk", "talk", "relax"}:
+                    defer_sleep_for_owner(cat)
 
                 timestamp_key = {
                     "feed": "last_fed",
