@@ -314,6 +314,75 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("cat:walk", card.html)
         self.assertNotIn("cat:talk", card.html)
 
+    def test_hidden_card_replaces_stats_with_search_controls(self) -> None:
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        cat = {
+            "cat_id": 91,
+            "name": "لوز",
+            "breed": "black",
+            "id_number": "919191",
+            "hunger": 20,
+            "happiness": 80,
+            "love_bar": 80,
+            "trust": 70,
+            "boredom": 20,
+            "rest_level": 80,
+            "rest_updated_at": now.isoformat(),
+            "hidden_spot": "box",
+            "hidden_started_at": now.isoformat(),
+            "hidden_until": (now + timedelta(hours=1)).isoformat(),
+            "sleep_until": None,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("<h1>لوز</h1>", card.html)
+        self.assertIn("اختفت بالبيت", card.html)
+        self.assertIn("cat:91:hide_bed", card.html)
+        self.assertIn("cat:91:hide_box", card.html)
+        self.assertIn("cat:91:hide_curtain", card.html)
+        self.assertIn("cat:91:hide_call", card.html)
+        self.assertIn("📣 نادي لوز", card.html)
+        self.assertNotIn("<table", card.html)
+        self.assertNotIn("cat:91:feed", card.html)
+        self.assertNotIn("cat:91:play", card.html)
+
+    def test_active_cat_request_adds_direct_action_and_ignore(self) -> None:
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        cat = {
+            "cat_id": 92,
+            "name": "لوز",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "929292",
+            "hunger": 20,
+            "happiness": 80,
+            "love_bar": 80,
+            "trust": 70,
+            "boredom": 20,
+            "rest_level": 80,
+            "rest_updated_at": now.isoformat(),
+            "last_fed": now.isoformat(),
+            "last_played": now.isoformat(),
+            "last_walk": now.isoformat(),
+            "last_talk": now.isoformat(),
+            "last_relax": now.isoformat(),
+            "last_social_at": now.isoformat(),
+            "active_request_action": "play",
+            "active_request_started_at": now.isoformat(),
+            "active_request_until": (now + timedelta(hours=1)).isoformat(),
+            "sleep_until": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("جابت لعبتها", card.html)
+        self.assertIn('data="cat:92:play"', card.html)
+        self.assertIn('data="cat:92:request_ignore"', card.html)
+        self.assertIn("🙈 طنش", card.html)
+        self.assertIn("<table", card.html)
+
     def test_postgres_runtime_state_sections(self) -> None:
         from bot.database.models import default_runtime_state
 

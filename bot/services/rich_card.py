@@ -8,6 +8,12 @@ from aiogram.types import (
 )
 
 from bot.services.economy import ACTIVE_BREEDS
+from bot.services.cat_events import (
+    active_cat_request,
+    active_hiding,
+    request_label,
+    request_message,
+)
 from bot.services.local_store import (
     collect_needs,
     fullness_percent,
@@ -40,6 +46,42 @@ async def build_rich_card(
     *,
     upload_chat_id: int | str | None = None,
 ) -> InputRichMessage:
+    cat_id = cat.get("cat_id")
+
+    def action_data(action: str) -> str:
+        return f"cat:{cat_id}:{action}" if cat_id else f"cat:{action}"
+
+    if active_hiding(cat):
+        name = html.escape(str(cat.get("name", "قطتك")))
+        breed = html.escape(str(cat.get("breed", "")))
+        number = html.escape(str(cat.get("id_number", "")))
+        notice = cat.get("action_notice", "")
+        notice_html = (
+            f"<p><b>{html.escape(str(notice))}</b></p>"
+            if notice
+            else ""
+        )
+        call_label = html.escape(f"📣 نادي {cat.get('name', 'قطتك')}")
+        return InputRichMessage(
+            html=f"""
+<h1>{name}</h1>
+<p>🙀 اختفت بالبيت. دور عليها أو ناديها باسمها.</p>
+{notice_html}
+<tg-button-row align="center">
+<tg-button type="callback_data" data="{action_data('hide_bed')}">🛏 تحت السرير</tg-button>
+<tg-button type="callback_data" data="{action_data('hide_box')}">📦 داخل الكارتونة</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+<tg-button type="callback_data" data="{action_data('hide_curtain')}">🪟 ورا الستارة</tg-button>
+</tg-button-row>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="primary" data="{action_data('hide_call')}">{call_label}</tg-button>
+</tg-button-row>
+<footer>🐈 السلالة: {breed} | #{number}</footer>
+""".strip(),
+            is_rtl=True,
+        )
+
     asset_kind = "play" if media_kind == "toy" else media_kind
     resolved = await resolve_cat_media(
         bot,
@@ -316,6 +358,18 @@ async def build_rich_card(
     boredom_note = html.escape(stat_note("boredom", boredom))
     sleep_note_cell = html.escape(stat_note("rest", sleep_need))
 
+    request_action = active_cat_request(cat)
+    if request_action:
+        request_html = f"""
+<h3>{html.escape(request_message(request_action))}</h3>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="success" data="{action_data(request_action)}">{html.escape(request_label(request_action))}</tg-button>
+<tg-button type="callback_data" style="secondary" data="{action_data('request_ignore')}">🙈 طنش</tg-button>
+</tg-button-row>
+""".strip()
+    else:
+        request_html = ""
+
     action_labels = {
         "feed": "🍖 إطعام",
         "play": "🎾 لعب",
@@ -361,10 +415,6 @@ async def build_rich_card(
         else "🛋 استلقاء"
     )
     sleep_button_label = "⚡😴 نوم" if next_action == "sleep" else "😴 نوم"
-    cat_id = cat.get("cat_id")
-
-    def action_data(action: str) -> str:
-        return f"cat:{cat_id}:{action}" if cat_id else f"cat:{action}"
     if sleeping:
         action_buttons_html = f"""
 <tg-button-row align="center">
@@ -470,6 +520,7 @@ async def build_rich_card(
 {breed_notice_html}
 <hr/>
 {media_markup}
+{request_html}
 <hr/>
 <table bordered striped compact>
 <tr><th>الحالة</th><th>النسبة</th><th>ملاحظة</th></tr>

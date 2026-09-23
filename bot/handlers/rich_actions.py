@@ -10,6 +10,14 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
 from bot.config import settings
+from bot.services.cat_events import (
+    HIDE_SPOT_LABELS,
+    active_hiding,
+    call_hidden_cat,
+    fulfill_cat_request,
+    ignore_cat_request,
+    search_hidden_cat,
+)
 from bot.services.economy import check_cooldown
 from bot.services.local_store import (
     apply_care_effects,
@@ -206,6 +214,107 @@ async def _handle_rich_action_locked(
         await query.answer()
         return
 
+    if action.startswith("hide_"):
+        if not active_hiding(cat):
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "status",
+                ),
+            )
+            await query.answer("😺 رجعت من مخباها بالفعل.", show_alert=True)
+            return
+
+        notice_token: str | None = None
+        found = False
+        if action == "hide_call":
+            found = call_hidden_cat(cat)
+            if found:
+                notice_token = _set_action_notice(
+                    cat,
+                    f"😺 ناديتها باسمها وطلعتلك {cat['name']}!",
+                )
+            else:
+                notice_token = _set_action_notice(
+                    cat,
+                    f"📣 ناديت {cat['name']}... سمعتك بس بعد ما طلعت 😼",
+                )
+        else:
+            spot = action.removeprefix("hide_")
+            if spot not in HIDE_SPOT_LABELS:
+                await query.answer("هذا مكان بحث قديم.", show_alert=True)
+                return
+            found = search_hidden_cat(cat, spot)
+            if found:
+                notice_token = _set_action_notice(
+                    cat,
+                    f"😺 لقيتها {HIDE_SPOT_LABELS[spot]}!",
+                )
+            else:
+                notice_token = _set_action_notice(
+                    cat,
+                    f"👀 دورت {HIDE_SPOT_LABELS[spot]}... مو هنا.",
+                )
+
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(
+                query,
+                cat,
+                await get_user_points(user_id),
+                "status",
+            ),
+        )
+        await query.answer()
+        if notice_token:
+            _schedule_notice_clear(query, user_id, notice_token)
+        return
+
+    if active_hiding(cat):
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(
+                query,
+                cat,
+                await get_user_points(user_id),
+                "status",
+            ),
+        )
+        await query.answer(
+            "🙀 قطتك مختفية هسه؛ دور عليها أو ناديها باسمها.",
+            show_alert=True,
+        )
+        return
+
+    if action == "request_ignore":
+        ignored = ignore_cat_request(cat)
+        if ignored is None:
+            await query.answer("ماكو طلب فعال هسه.", show_alert=True)
+            return
+        notice_token = _set_action_notice(
+            cat,
+            "😿 طنشت طلبها؛ زعلت شوي وراحت تشغل نفسها.",
+        )
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(
+                query,
+                cat,
+                await get_user_points(user_id),
+                "status",
+            ),
+        )
+        await query.answer()
+        _schedule_notice_clear(query, user_id, notice_token)
+        return
+
     if action == "wake" and not is_sleeping(cat):
         await update_cat(cat)
         await _edit_card(
@@ -305,6 +414,7 @@ async def _handle_rich_action_locked(
             action,
             bypassed_cooldown=bypassed_cooldown,
         )
+        request_fulfilled = fulfill_cat_request(cat, action)
 
         streak = int(cat.get("same_action_streak", 1))
         if action == "play" and streak >= 5:
@@ -350,6 +460,12 @@ async def _handle_rich_action_locked(
                     if action == "play"
                     else "😽 قربت منك وصارت تتمسح بيك من كثر ما ارتاحت للحچي."
                 ),
+            )
+
+        if request_fulfilled:
+            notice_token = _set_action_notice(
+                cat,
+                "😻 هذا بالضبط اللي كانت تريده منك!",
             )
 
     elif action == "sleep":
