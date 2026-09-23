@@ -33,6 +33,8 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_remaining_minutes,
     start_sleep,
+    stubbornly_refuses_sleep,
+    stubbornly_refuses_wake,
     update_cat,
     user_action_lock,
     wake_now,
@@ -523,18 +525,30 @@ async def _guest_message_locked(message: Message) -> None:
                 return
 
             elif action == "sleep":
+                card_cat = cat
                 if is_sleeping(cat):
                     title = "😴 القطة نائمة أصلًا"
                     description = cat["name"]
+                    card_state = "sleep"
                 else:
                     rest_now = sleep_need_percent(cat)
                     if rest_now >= 98:
                         title = "😺 ما تحتاج تنام"
                         description = "طاقتها وراحتها شبه كاملة."
+                        card_state = "status"
+                    elif stubbornly_refuses_sleep(cat):
+                        title = "😾 عاندت القطة"
+                        description = "ما رضت تنام هسه؛ جرّب وياها مرة ثانية."
+                        card_state = "cat_angry_sleep"
+                        card_cat = dict(
+                            cat,
+                            action_notice="😾 عاندت وما رضت تنام هسه!",
+                        )
                     else:
                         planned_minutes = start_sleep(cat)
                         await update_cat(cat)
                         duration = sleep_duration_text(planned_minutes)
+                        card_state = "sleep"
                         if cat.get("sleep_kind") == "main":
                             title = "😴 نامت القطة"
                             description = f"نوم رئيسي، تقريباً {duration}."
@@ -544,9 +558,9 @@ async def _guest_message_locked(message: Message) -> None:
                 card = await _build_guest_card(
                     message,
                     caller,
-                    cat,
+                    card_cat,
                     await get_user_points(user_id),
-                    "sleep" if is_sleeping(cat) else "status",
+                    card_state,
                 )
                 result = InlineQueryResultArticle(
                     id="guest-sleep",
@@ -558,28 +572,39 @@ async def _guest_message_locked(message: Message) -> None:
                 return
 
             elif action == "wake":
+                card_cat = cat
+                card_state = "status"
                 if is_sleeping(cat):
-                    rest_before_wake = sleep_need_percent(cat)
-                    if wake_now(cat):
-                        trust_loss = 0
-                        if rest_before_wake < 30:
-                            trust_loss = 3
-                        elif rest_before_wake < 50:
-                            trust_loss = 2
-                        elif rest_before_wake < 70:
-                            trust_loss = 1
-                        if trust_loss:
-                            cat["trust"] = max(
-                                0,
-                                int(cat.get("trust", 60)) - trust_loss,
-                            )
-                    await update_cat(cat)
-                    title = "☀️ صحت القطة"
-                    description = (
-                        "صحّيتها بدري، فثقتها نزلت شوي."
-                        if rest_before_wake < 70
-                        else cat["name"]
-                    )
+                    if stubbornly_refuses_wake(cat):
+                        title = "😾 ما رضت تكعد"
+                        description = "تريد تكمل نومها شوي؛ جرّب مرة ثانية."
+                        card_state = "cat_angry_sleep"
+                        card_cat = dict(
+                            cat,
+                            action_notice="😾 عاندت وما رضت تكعد؛ تريد تكمل نومها.",
+                        )
+                    else:
+                        rest_before_wake = sleep_need_percent(cat)
+                        if wake_now(cat):
+                            trust_loss = 0
+                            if rest_before_wake < 30:
+                                trust_loss = 3
+                            elif rest_before_wake < 50:
+                                trust_loss = 2
+                            elif rest_before_wake < 70:
+                                trust_loss = 1
+                            if trust_loss:
+                                cat["trust"] = max(
+                                    0,
+                                    int(cat.get("trust", 60)) - trust_loss,
+                                )
+                        await update_cat(cat)
+                        title = "☀️ صحت القطة"
+                        description = (
+                            "صحّيتها بدري، فثقتها نزلت شوي."
+                            if rest_before_wake < 70
+                            else cat["name"]
+                        )
                 else:
                     title = "😺 صحت من نفسها" if woke else "😺 القطة صاحية أصلًا"
                     description = (
@@ -591,9 +616,9 @@ async def _guest_message_locked(message: Message) -> None:
                 card = await _build_guest_card(
                     message,
                     caller,
-                    cat,
+                    card_cat,
                     await get_user_points(user_id),
-                    "status",
+                    card_state,
                 )
                 result = InlineQueryResultArticle(
                     id="guest-wake",
