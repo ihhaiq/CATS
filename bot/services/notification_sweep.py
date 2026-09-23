@@ -11,6 +11,7 @@ except ModuleNotFoundError:
    AsyncIOScheduler = None
 
 from bot.config import settings
+from bot.services.activity_sweep import run_activity_sweep
 from bot.services.media_runtime import resolve_cat_media
 from bot.services.local_store import (
    apply_decay,
@@ -345,6 +346,8 @@ async def _sweep(bot: Bot) -> None:
                cat["last_notified_at"] = None
 
             await update_cat(cat)
+
+      await run_activity_sweep(bot)
 
 
 def start_notification_sweep(bot: Bot) -> None:
