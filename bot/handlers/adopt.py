@@ -32,6 +32,10 @@ class AdoptFlow(StatesGroup):
   waiting_name = State()
 
 
+class RenameFlow(StatesGroup):
+  waiting_name = State()
+
+
 def _welcome_keyboard() -> InlineKeyboardMarkup:
   return InlineKeyboardMarkup(
     inline_keyboard=[
@@ -91,6 +95,7 @@ def _adopted_card(
   *,
   newly_adopted: bool = True,
   show_breed_notice: bool = False,
+  show_rename: bool = False,
 ) -> InputRichMessage:
   heading = (
     f"🐾 تم تبني {html.escape(str(cat['name']))}!"
@@ -111,12 +116,20 @@ def _adopted_card(
     if show_breed_notice and cat.get("breed") not in ACTIVE_BREEDS
     else ""
   )
+  rename_control = (
+    "<tg-button-row align=\"center\">"
+    "<tg-button type=\"callback_data\" style=\"secondary\" data=\"cat:name:change\">تغيير اسم القطة</tg-button>"
+    "</tg-button-row>"
+    if show_rename
+    else ""
+  )
   return InputRichMessage(
     html=f"""
 <h2>{heading}</h2>
 <p>السلالة: {html.escape(str(cat['breed']))}</p>
 <p>رقمها: #{html.escape(str(cat['id_number']))}</p>
 {breed_notice}
+{rename_control}
 <tg-button-row align="center">
 <tg-button type="callback_data" style="primary" data="{status_data}">عرض القطة</tg-button>
 </tg-button-row>
@@ -130,6 +143,7 @@ async def _send_adopted(
   cat: dict,
   *,
   newly_adopted: bool = True,
+  show_rename: bool = False,
 ) -> None:
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
@@ -137,6 +151,7 @@ async def _send_adopted(
       cat,
       newly_adopted=newly_adopted,
       show_breed_notice=not newly_adopted,
+      show_rename=show_rename,
     ),
   )
 
@@ -214,6 +229,7 @@ async def cmd_start(message: Message) -> None:
         cat,
         newly_adopted=False,
         show_breed_notice=True,
+        show_rename=True,
       ),
     )
     return
@@ -344,7 +360,7 @@ async def cmd_adopt(message: Message, state: FSMContext) -> None:
     return
 
   parts = (message.text or "").split(maxsplit=1)
-  name = parts[1].strip() if len(parts) > 1 else "لوز"
+  name = parts[1].strip() if len(parts) > 1 else ""
   if len(name) > 40:
     await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
     return
@@ -355,6 +371,56 @@ async def cmd_adopt(message: Message, state: FSMContext) -> None:
   await message.answer(
     "🐾 اختار نوع قطتك:",
     reply_markup=_breed_keyboard(),
+  )
+
+
+@router.callback_query(F.data == "cat:name:change")
+async def cb_change_name(query: CallbackQuery, state: FSMContext) -> None:
+  """Ask an existing owner for a new cat name."""
+  user_id = query.from_user.id
+  await ensure_user(user_id)
+  cat = await get_user_cat(user_id)
+  if cat is None:
+    await state.clear()
+    await query.answer("ما عندك قطة بعد.", show_alert=True)
+    return
+
+  await state.clear()
+  await state.set_state(RenameFlow.waiting_name)
+  await query.answer()
+  if query.message:
+    await query.message.answer("شنو تريد تسمي قطتك؟ أرسل الاسم الجديد فقط.")
+
+
+@router.message(RenameFlow.waiting_name)
+async def receive_new_cat_name(message: Message, state: FSMContext) -> None:
+  name = (message.text or "").strip()
+  if not name:
+    await message.answer("أرسل اسم القطة كنص.")
+    return
+  if len(name) > 40:
+    await message.answer("اسم القطة طويل جداً، خلّه أقل من 40 حرفاً.")
+    return
+
+  user_id = message.from_user.id
+  async with user_action_lock(user_id):
+    await ensure_user(user_id)
+    cat = await get_user_cat(user_id)
+    if cat is None:
+      await state.clear()
+      await message.answer("ما عندك قطة بعد.")
+      return
+
+    cat["name"] = name
+    await update_cat(cat)
+
+  await state.clear()
+  await message.answer("تم تغيير اسم القطة.")
+  await _send_adopted(
+    message,
+    cat,
+    newly_adopted=False,
+    show_rename=True,
   )
 
 
