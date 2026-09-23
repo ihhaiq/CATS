@@ -32,6 +32,8 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_remaining_minutes,
     start_sleep,
+    stubborn_care_refusal_reason,
+    stubborn_refusal_text,
     stubbornly_refuses_sleep,
     stubbornly_refuses_wake,
     sync_decay_accumulators,
@@ -244,6 +246,27 @@ async def _handle_rich_action_locked(
                 show_alert=True,
             )
         return
+
+    if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
+        refusal_reason = stubborn_care_refusal_reason(cat, action)
+        if refusal_reason:
+            notice_token = _set_action_notice(
+                cat,
+                stubborn_refusal_text(action, refusal_reason),
+            )
+            await update_cat(cat)
+            await _edit_card(
+                query,
+                await _build_card(
+                    query,
+                    cat,
+                    await get_user_points(user_id),
+                    "cat_angry_sleep",
+                ),
+            )
+            await query.answer()
+            _schedule_notice_clear(query, user_id, notice_token)
+            return
 
     media_kind = action
     notice_token: str | None = None
