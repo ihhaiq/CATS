@@ -229,9 +229,6 @@ async def _handle_rich_action_locked(
         )
         return
 
-    if action in {"play", "toy", "walk", "talk", "relax"}:
-        defer_sleep_for_owner(cat)
-
     block_reason = action_block_reason(cat, action)
     if block_reason:
         await update_cat(cat)
@@ -267,6 +264,9 @@ async def _handle_rich_action_locked(
             await query.answer()
             _schedule_notice_clear(query, user_id, notice_token)
             return
+
+    if action in {"play", "toy", "walk", "talk", "relax"}:
+        defer_sleep_for_owner(cat)
 
     media_kind = action
     notice_token: str | None = None
