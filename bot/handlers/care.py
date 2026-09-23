@@ -5,6 +5,7 @@ from aiogram.types import Message
 from datetime import datetime
 
 from bot.config import settings
+from bot.services.cat_events import active_hiding, fulfill_cat_request
 from bot.services.economy import check_cooldown
 from bot.services.local_store import (
   action_block_reason,
@@ -100,6 +101,13 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     )
     return
 
+  if active_hiding(cat):
+    await update_cat(cat)
+    await message.answer(
+      "🙀 قطتك مختفية هسه. افتح /status ودور عليها أو ناديها باسمها."
+    )
+    return
+
   block_reason = action_block_reason(cat, action)
   if block_reason:
     await update_cat(cat)
@@ -151,6 +159,8 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     apply_care_effects(cat, action)
     cat[timestamp_key] = datetime.utcnow().isoformat()
 
+  request_fulfilled = fulfill_cat_request(cat, action)
+
   if action == "feed":
     text = "🍖 أكلت القطة وصارت أهدأ وأسعد"
   elif action == "play":
@@ -183,7 +193,9 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     action in {"talk", "walk", "toy"}
     and int(cat.get("same_action_streak", 1)) >= 4
   )
-  if overused_routine:
+  if request_fulfilled:
+    reward_note = "\n😻 هذا بالضبط اللي كانت تريده منك!"
+  elif overused_routine:
     reward_note = (
       "\n🌀 تكرار نفس النشاط زاد الملل؛ غيّر الروتين حتى ترجع تستمتع."
     )
