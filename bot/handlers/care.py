@@ -28,6 +28,8 @@ from bot.services.local_store import (
   sleep_duration_text,
   sleep_need_percent,
   sleep_remaining_minutes,
+  stubborn_care_refusal_reason,
+  stubborn_refusal_text,
   update_cat,
   user_action_lock,
 )
@@ -108,6 +110,12 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
       await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة.")
     else:
       await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة.")
+    return
+
+  refusal_reason = stubborn_care_refusal_reason(cat, action)
+  if refusal_reason:
+    await update_cat(cat)
+    await message.answer(stubborn_refusal_text(action, refusal_reason))
     return
 
   timestamp_key = {
