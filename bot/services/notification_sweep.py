@@ -12,6 +12,7 @@ except ModuleNotFoundError:
 
 from bot.config import settings
 from bot.services.activity_sweep import run_activity_sweep
+from bot.services.cat_events import active_cat_request, active_hiding
 from bot.services.media_runtime import resolve_cat_media
 from bot.services.local_store import (
    apply_decay,
@@ -130,6 +131,12 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
          "💤 خلصت قيلولتها وصحت من نفسها.\n"
          "🎾 لعبت شوي وحدها لأنك مو يمها وافتقدتك."
       )
+   elif kind == "away":
+      message = (
+         "استيقظت قطتك 🐈\n"
+         "😴 شبعت من نومتها الطويلة وهي وحدها.\n"
+         "🐾 إذا تبقى بعيد عنها راح تدور قطط تزورها أو ترجع تنام."
+      )
    else:
       message = (
          "استيقظت قطتك 🐈\n"
@@ -240,7 +247,11 @@ async def _sweep(bot: Bot) -> None:
             await _send_wake_notice(bot, cat)
 
             sleeping = is_sleeping(cat)
-            if not sleeping:
+            if (
+               not sleeping
+               and not active_hiding(cat)
+               and not active_cat_request(cat)
+            ):
                auto_kind = should_auto_sleep(cat)
                if auto_kind:
                   minutes = start_sleep(cat, kind_override=auto_kind)
@@ -249,6 +260,11 @@ async def _sweep(bot: Bot) -> None:
                      message = (
                         "😴 قطتك نعست وراحت تاخذ قيلولة قصيرة من نفسها.\n"
                         f"💤 تقريباً {duration}."
+                     )
+                  elif auto_kind == "away":
+                     message = (
+                        "😴 ماكو أحد يمها، فنامت نومة طويلة من نفسها.\n"
+                        f"💤 تقريباً {duration} حتى تشبع نوم."
                      )
                   else:
                      message = (
