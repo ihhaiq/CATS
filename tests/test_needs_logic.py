@@ -21,6 +21,8 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_ready_to_finish,
     start_sleep,
+    stubbornly_refuses_sleep,
+    stubbornly_refuses_wake,
     wake_now,
 )
 
@@ -525,6 +527,14 @@ class CoupledNeedsTests(unittest.TestCase):
         urgent = notification_gap_seconds(["starving"])
         self.assertLess(urgent, mild)
 
+    def test_feed_at_seventy_percent_fullness_is_meaningful(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 30
+        apply_care_effects(cat, "feed")
+        self.assertTrue(cat["last_care_meaningful"])
+        self.assertEqual(cat["hunger"], 0)
+        self.assertGreater(care_reward_points(cat, "feed"), 0)
+
     def test_optional_care_without_real_need_has_no_reward(self) -> None:
         cat = old_cat(0)
         cat["happiness"] = 100
@@ -608,6 +618,18 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertIn("walk_due", needs)
         self.assertIn("very_sad", needs)
 
+
+    def test_manual_sleep_and_wake_can_be_stubborn(self) -> None:
+        cat = old_cat(0)
+        self.assertTrue(stubbornly_refuses_sleep(cat, roll=0.0))
+        self.assertFalse(stubbornly_refuses_sleep(cat, roll=0.99))
+
+        now = datetime.utcnow()
+        cat["sleep_started_at"] = now.isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
+        self.assertTrue(stubbornly_refuses_wake(cat, roll=0.0))
+        self.assertFalse(stubbornly_refuses_wake(cat, roll=0.99))
+        self.assertFalse(stubbornly_refuses_sleep(cat, roll=0.0))
 
     def test_owner_interaction_defers_auto_sleep(self) -> None:
         cat = old_cat(0)
