@@ -199,7 +199,7 @@ WALK_DUE_HOURS = 14.0
 ROUTINE_WINDOW_HOURS = 6.0
 CAT_DAILY_SLEEP_TARGET_HOURS = 14.0
 HEALTHY_SLEEP_HOURS = 16.0
-MAIN_SLEEP_REST_THRESHOLD = 28
+MAIN_SLEEP_REST_THRESHOLD = 40
 MAIN_SLEEP_MIN_HOURS = 3.0
 MAIN_SLEEP_MAX_HOURS = 7.5
 NAP_MIN_HOURS = 10 / 60
@@ -208,6 +208,14 @@ AUTO_NAP_REST_THRESHOLD = 55
 FORCE_SLEEP_REST_THRESHOLD = 8
 NAP_COOLDOWN_HOURS = 6.0
 OWNER_SLEEP_RESIST_MINUTES = 30
+OWNER_AWAY_AFTER_HOURS = 4.0
+AWAY_SLEEP_MIN_HOURS = 5.0
+AWAY_SLEEP_MAX_HOURS = 7.5
+AWAY_SLEEP_COOLDOWN_HOURS = 2.0
+AWAY_SLEEP_BOREDOM_RISE_PER_HOUR = 1.75
+AWAY_SLEEP_LOVE_FALL_PER_HOUR = 0.55
+AWAY_SLEEP_TRUST_FALL_PER_HOUR = 0.30
+TREAT_FULLNESS_THRESHOLD = 75
 SOLO_WAKE_LOVE_PENALTY = 1
 SOLO_WAKE_BOREDOM_RELIEF = 8
 SOLO_WAKE_HAPPINESS_GAIN = 3
@@ -380,11 +388,62 @@ def sleep_is_deferred_for_owner(
         return False
 
 
+def mark_owner_interaction(
+    cat: dict,
+    moment: datetime | None = None,
+) -> None:
+    """Record a real owner care interaction, not a passive status refresh."""
+    now = moment or datetime.utcnow()
+    cat["last_owner_interaction_at"] = now.isoformat()
+
+
+def owner_is_away(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    """Treat the owner as away after several hours without real care."""
+    now = moment or datetime.utcnow()
+    timestamps: list[datetime] = []
+    for key in (
+        "last_owner_interaction_at",
+        "last_care_at",
+        "last_fed",
+        "last_played",
+        "last_toy",
+        "last_walk",
+        "last_talk",
+        "last_relax",
+        "last_wake_at",
+        "adopted_at",
+        "created_at",
+    ):
+        raw = cat.get(key)
+        if not raw:
+            continue
+        try:
+            timestamps.append(parse_time(raw))
+        except (TypeError, ValueError):
+            continue
+    if not timestamps:
+        return False
+    return now - max(timestamps) >= timedelta(hours=OWNER_AWAY_AFTER_HOURS)
+
+
+def _away_sleep_cooldown_ready(cat: dict, moment: datetime) -> bool:
+    raw = cat.get("last_away_sleep_at")
+    if not raw:
+        return True
+    try:
+        return moment - parse_time(raw) >= timedelta(hours=AWAY_SLEEP_COOLDOWN_HOURS)
+    except (TypeError, ValueError):
+        return True
+
+
 def should_auto_sleep(
     cat: dict,
     moment: datetime | None = None,
 ) -> str | None:
-    """Return main/nap when the cat should fall asleep without owner input."""
+    """Return main/nap/away when the cat should fall asleep without owner input."""
     now = moment or datetime.utcnow()
     if is_sleeping(cat):
         return None
@@ -394,6 +453,8 @@ def should_auto_sleep(
         return "main"
     if sleep_is_deferred_for_owner(cat, now):
         return None
+    if owner_is_away(cat, now) and _away_sleep_cooldown_ready(cat, now):
+        return "away"
     if rest <= MAIN_SLEEP_REST_THRESHOLD:
         return "main"
     if rest > AUTO_NAP_REST_THRESHOLD:
@@ -458,7 +519,17 @@ def sleep_plan(cat: dict, moment: datetime | None = None) -> tuple[str, float]:
 def start_sleep(cat: dict, kind_override: str | None = None) -> int:
     now = datetime.utcnow()
     kind, hours = sleep_plan(cat, now)
-    if kind_override in {"main", "nap"} and kind_override != kind:
+    if kind_override == "away":
+        kind = "away"
+        deficit_hours = max(
+            0.0,
+            (100 - _refresh_rest(cat, now)) / REST_RECOVERY_PER_SLEEP_HOUR,
+        )
+        hours = min(
+            AWAY_SLEEP_MAX_HOURS,
+            max(AWAY_SLEEP_MIN_HOURS, deficit_hours),
+        )
+    elif kind_override in {"main", "nap"} and kind_override != kind:
         kind = kind_override
         if kind == "nap":
             deficit_hours = max(NAP_MIN_HOURS, (100 - _refresh_rest(cat, now)) / REST_RECOVERY_PER_SLEEP_HOUR)
@@ -522,8 +593,10 @@ def finish_sleep(cat: dict, *, owner_present: bool = False) -> bool:
         cat["last_nap_at"] = now.isoformat()
     elif kind == "main":
         cat["last_main_sleep_at"] = now.isoformat()
+    elif kind == "away":
+        cat["last_away_sleep_at"] = now.isoformat()
 
-    if not owner_present:
+    if not owner_present and kind != "away":
         cat["last_solo_play_at"] = now.isoformat()
         cat["boredom"] = max(
             0,
@@ -715,6 +788,11 @@ def apply_decay(cat: dict) -> None:
             _long_sleep_between(cat, cursor, step_end)
             * BOREDOM_RISE_PER_LONG_SLEEP_HOUR
         )
+        away_sleep = asleep if cat.get("sleep_kind") == "away" else 0.0
+        if away_sleep:
+            boredom += away_sleep * AWAY_SLEEP_BOREDOM_RISE_PER_HOUR
+            love -= away_sleep * AWAY_SLEEP_LOVE_FALL_PER_HOUR
+            trust -= away_sleep * AWAY_SLEEP_TRUST_FALL_PER_HOUR
         boredom = min(100.0, boredom)
 
         # Happiness is affected by actual current needs, not just elapsed time.
@@ -840,6 +918,7 @@ def apply_light_interaction(cat: dict, action: str) -> None:
     cat["last_care_action"] = action
     cat["same_action_streak"] = streak
     cat["last_care_at"] = moment.isoformat()
+    mark_owner_interaction(cat, moment)
 
     if action in {"play", "walk", "talk", "relax", "toy"}:
         cat["last_social_at"] = moment.isoformat()
@@ -870,6 +949,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
     cat["last_care_action"] = action
     cat["same_action_streak"] = streak
     cat["last_care_at"] = moment.isoformat()
+    mark_owner_interaction(cat, moment)
 
     boredom = int(cat.get("boredom", 10))
     trust = int(cat.get("trust", 60))
@@ -883,7 +963,9 @@ def apply_care_effects(cat: dict, action: str) -> None:
     if action == "feed":
         meaningful = hunger_before >= 30
         if meaningful:
-            cat["hunger"] = max(0, hunger_before - 40)
+            # One real meal should move even a starving cat into the satiated
+            # range so the UI can switch from feeding to a small treat.
+            cat["hunger"] = max(0, hunger_before - 75)
             boredom_drop = 10
         elif hunger_before > 15:
             cat["hunger"] = max(15, hunger_before - 10)
@@ -894,6 +976,14 @@ def apply_care_effects(cat: dict, action: str) -> None:
         cat["happiness"] = min(100, happiness_before + (8 if meaningful else 1))
         cat["love_bar"] = min(100, love_before + (3 if meaningful else 0))
         cat["boredom"] = max(0, boredom - boredom_drop)
+
+    elif action == "treat":
+        meaningful = fullness_percent(cat) >= TREAT_FULLNESS_THRESHOLD
+        if meaningful:
+            cat["hunger"] = max(0, hunger_before - 30)
+            cat["love_bar"] = min(100, love_before + 15)
+            cat["boredom"] = max(0, boredom - 20)
+            cat["happiness"] = min(100, happiness_before + 5)
 
     elif action == "play":
         meaningful = (boredom >= 20 or happiness_before <= 80) and streak < 5
@@ -1028,6 +1118,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
     trust_gain = {
         "feed": 2,
+        "treat": 0,
         "play": 2,
         "toy": 1,
         "walk": 3,
