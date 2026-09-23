@@ -31,10 +31,12 @@ from bot.services.local_store import (
     ensure_user,
     defer_sleep_for_owner,
     finish_sleep,
+    fullness_percent,
     get_cat_by_id,
     get_user_cat,
     get_user_points,
     is_sleeping,
+    mark_owner_interaction,
     parse_time,
     sleep_duration_text,
     sleep_need_percent,
@@ -45,6 +47,7 @@ from bot.services.local_store import (
     stubbornly_refuses_sleep,
     stubbornly_refuses_wake,
     sync_decay_accumulators,
+    TREAT_FULLNESS_THRESHOLD,
     update_cat,
     user_action_lock,
     wake_now,
@@ -353,7 +356,19 @@ async def _handle_rich_action_locked(
             )
         return
 
-    if action in {"feed", "play", "toy", "walk", "talk", "relax"}:
+    if action == "treat" and fullness_percent(cat) < TREAT_FULLNESS_THRESHOLD:
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(query, cat, await get_user_points(user_id), "status"),
+        )
+        await query.answer(
+            "🍬 التحلية تظهر من يصير الشبع 75% وفوك.",
+            show_alert=True,
+        )
+        return
+
+    if action in {"feed", "treat", "play", "toy", "walk", "talk", "relax"}:
         refusal_reason = stubborn_care_refusal_reason(cat, action)
         if refusal_reason:
             notice_token = _set_action_notice(
@@ -374,7 +389,7 @@ async def _handle_rich_action_locked(
             _schedule_notice_clear(query, user_id, notice_token)
             return
 
-    if action in {"play", "toy", "walk", "talk", "relax"}:
+    if action in {"treat", "play", "toy", "walk", "talk", "relax"}:
         defer_sleep_for_owner(cat)
 
     media_kind = action
@@ -384,6 +399,7 @@ async def _handle_rich_action_locked(
 
     care_specs = {
         "feed": ("last_fed", settings.feed_cooldown),
+        "treat": ("last_treat", settings.treat_cooldown),
         "play": ("last_played", settings.play_cooldown),
         "toy": ("last_toy", settings.toy_cooldown),
         "walk": ("last_walk", settings.walk_cooldown),
@@ -417,7 +433,12 @@ async def _handle_rich_action_locked(
         request_fulfilled = fulfill_cat_request(cat, action)
 
         streak = int(cat.get("same_action_streak", 1))
-        if action == "play" and streak >= 5:
+        if action == "treat":
+            notice_token = _set_action_notice(
+                cat,
+                "🍬 أخذت التحلية؛ شبعت أكثر، حبها زاد هواية ومللها نزل.",
+            )
+        elif action == "play" and streak >= 5:
             notice_token = _set_action_notice(
                 cat,
                 "😾 ملت من نفس اللعب؛ تگدر تبقى تتفاعل وياها، بس غيّر النشاط حتى تستمتع أكثر.",
@@ -469,6 +490,7 @@ async def _handle_rich_action_locked(
             )
 
     elif action == "sleep":
+        mark_owner_interaction(cat)
         rest_now = sleep_need_percent(cat)
         if rest_now >= 98:
             notice_token = _set_action_notice(
@@ -524,6 +546,7 @@ async def _handle_rich_action_locked(
             )
 
     elif action == "wake":
+        mark_owner_interaction(cat)
         if stubbornly_refuses_wake(cat):
             notice_token = _set_action_notice(
                 cat,
