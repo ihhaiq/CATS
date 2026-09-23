@@ -89,7 +89,7 @@ class RuntimeTests(unittest.TestCase):
             "breed": "black",
             "age_days": 5,
             "id_number": "123456",
-            "hunger": 20,
+            "hunger": 30,
             "happiness": 90,
             "love_bar": 100,
             "slept_today_hours": 10,
@@ -127,7 +127,7 @@ class RuntimeTests(unittest.TestCase):
             "breed": "black",
             "age_days": 30,
             "id_number": "777777",
-            "hunger": 20,
+            "hunger": 30,
             "happiness": 90,
             "love_bar": 100,
             "trust": 60,
@@ -146,6 +146,34 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("cat:77:toy", card.html)
         self.assertIn("cat:77:status", card.html)
         self.assertNotIn('data="cat:feed"', card.html)
+
+    def test_satiated_card_replaces_feed_with_treat(self) -> None:
+        from datetime import datetime
+
+        cat = {
+            "cat_id": 88,
+            "name": "Treat",
+            "breed": "black",
+            "age_days": 30,
+            "id_number": "888888",
+            "hunger": 25,
+            "happiness": 80,
+            "love_bar": 70,
+            "trust": 60,
+            "boredom": 30,
+            "rest_level": 90,
+            "rest_updated_at": datetime.utcnow().isoformat(),
+            "last_fed": None,
+            "last_played": None,
+            "last_walk": None,
+            "last_talk": None,
+            "last_relax": None,
+            "slept_today_hours": 0.0,
+        }
+        card = asyncio.run(build_rich_card(None, cat, 0))
+        self.assertIn("cat:88:treat", card.html)
+        self.assertIn("تحلية 🍬", card.html)
+        self.assertNotIn("cat:88:feed", card.html)
 
     def test_rich_card_escapes_user_cat_name(self) -> None:
         cat = {
