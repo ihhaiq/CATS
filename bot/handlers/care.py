@@ -100,9 +100,6 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     )
     return
 
-  if action in {"play", "toy", "walk", "talk", "relax"}:
-    defer_sleep_for_owner(cat)
-
   block_reason = action_block_reason(cat, action)
   if block_reason:
     await update_cat(cat)
@@ -117,6 +114,9 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     await update_cat(cat)
     await message.answer(stubborn_refusal_text(action, refusal_reason))
     return
+
+  if action in {"play", "toy", "walk", "talk", "relax"}:
+    defer_sleep_for_owner(cat)
 
   timestamp_key = {
     "feed": "last_fed",
