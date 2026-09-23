@@ -413,7 +413,6 @@ def owner_is_away(
         "last_walk",
         "last_talk",
         "last_relax",
-        "last_wake_at",
         "adopted_at",
         "created_at",
     ):
