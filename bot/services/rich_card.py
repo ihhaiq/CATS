@@ -85,7 +85,7 @@ async def build_rich_card(
         "لكن قطتك تستمر وتشتغل بشكل طبيعي.</h3>"
         "<tg-button-row align=\"center\">"
         "<tg-button type=\"callback_data\" style=\"secondary\" "
-        "data=\"cat:breed:choose\">تغيير</tg-button>"
+        "data=\"cat:breed:choose\">🐾 تغيير</tg-button>"
         "</tg-button-row>"
         if cat.get("breed") not in ACTIVE_BREEDS
         else ""
@@ -100,6 +100,70 @@ async def build_rich_card(
 
     def stat_cell(value: str, highlight: bool) -> str:
         return f"<mark><b>{value}</b></mark>" if highlight else value
+
+    def stat_emoji(kind: str, value: int) -> str:
+        value = max(0, min(100, int(value)))
+        if kind == "fullness":
+            if value >= 80:
+                return "😋"
+            if value >= 60:
+                return "🍗"
+            if value >= 40:
+                return "🍽️"
+            if value >= 20:
+                return "🥣"
+            return "🚨"
+        if kind == "happiness":
+            if value >= 80:
+                return "😸"
+            if value >= 60:
+                return "🙂"
+            if value >= 40:
+                return "😐"
+            if value >= 20:
+                return "😿"
+            return "💔"
+        if kind == "love":
+            if value >= 80:
+                return "😻"
+            if value >= 60:
+                return "💗"
+            if value >= 40:
+                return "💕"
+            if value >= 20:
+                return "🥺"
+            return "💔"
+        if kind == "trust":
+            if value >= 80:
+                return "🤝"
+            if value >= 60:
+                return "🐾"
+            if value >= 40:
+                return "🤔"
+            if value >= 20:
+                return "🧊"
+            return "🚫"
+        if kind == "boredom":
+            if value <= 15:
+                return "😌"
+            if value <= 35:
+                return "😺"
+            if value <= 60:
+                return "😼"
+            if value <= 80:
+                return "🙀"
+            return "🌀"
+        if sleeping:
+            return "😴"
+        if value >= 80:
+            return "⚡"
+        if value >= 60:
+            return "🔋"
+        if value >= 40:
+            return "🥱"
+        if value >= 20:
+            return "😴"
+        return "🪫"
 
     action_highlights = {
         "feed": {"fullness", "happiness", "love", "trust", "boredom"},
@@ -267,36 +331,36 @@ async def build_rich_card(
         else ""
     )
     feed_label = (
-        "⚡ إطعام"
+        "⚡🍖 إطعام"
         if is_action_cooldown_bypassed(cat, "feed")
-        else "إطعام"
+        else "🍖 إطعام"
     )
     play_label = (
-        "⚡ لعب"
+        "⚡🎾 لعب"
         if is_action_cooldown_bypassed(cat, "play")
-        else "لعب"
+        else "🎾 لعب"
     )
     toy_label = (
-        "⚡ 🧸 اعطها لعبة"
+        "⚡🧸 اعطها لعبة"
         if is_action_cooldown_bypassed(cat, "toy")
         else "🧸 اعطها لعبة"
     )
     walk_label = (
-        "⚡ نزهة"
+        "⚡🌿 نزهة"
         if is_action_cooldown_bypassed(cat, "walk")
-        else "نزهة"
+        else "🌿 نزهة"
     )
     talk_label = (
-        "⚡ تحدث"
+        "⚡💬 تحدث"
         if is_action_cooldown_bypassed(cat, "talk")
-        else "تحدث"
+        else "💬 تحدث"
     )
     relax_label = (
-        "⚡ استلقاء"
+        "⚡🛋 استلقاء"
         if is_action_cooldown_bypassed(cat, "relax")
         else "🛋 استلقاء"
     )
-    sleep_button_label = "⚡ نوم" if next_action == "sleep" else "نوم"
+    sleep_button_label = "⚡😴 نوم" if next_action == "sleep" else "😴 نوم"
     cat_id = cat.get("cat_id")
 
     def action_data(action: str) -> str:
@@ -304,7 +368,7 @@ async def build_rich_card(
     if sleeping:
         action_buttons_html = f"""
 <tg-button-row align="center">
-<tg-button type="callback_data" style="primary" data="{action_data('wake')}">إيقاظ</tg-button>
+<tg-button type="callback_data" style="primary" data="{action_data('wake')}">☀️ إيقاظ</tg-button>
 </tg-button-row>
 <tg-button-row align="center">
 <tg-button type="callback_data" style="success" data="{action_data('status')}">🔄 تحديث</tg-button>
@@ -402,20 +466,19 @@ async def build_rich_card(
         else "😺 حالتها مستقرة هسه."
     )
     html_markup = f"""
-<h2>{html.escape(str(cat['name']))}</h2>
-<p>السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}</p>
+<h1>{html.escape(str(cat['name']))}</h1>
 {breed_notice_html}
 <hr/>
 {media_markup}
 <hr/>
 <table bordered striped compact>
 <tr><th>الحالة</th><th>النسبة</th><th>ملاحظة</th></tr>
-<tr><td>الشبع</td><td>{fullness_cell}</td><td>{fullness_note}</td></tr>
-<tr><td>السعادة</td><td>{happiness_cell}</td><td>{happiness_note}</td></tr>
-<tr><td>الحب</td><td>{love_cell}</td><td>{love_note}</td></tr>
-<tr><td>الثقة</td><td>{trust_cell}</td><td>{trust_note}</td></tr>
-<tr><td>الملل</td><td>{boredom_cell}</td><td>{boredom_note}</td></tr>
-<tr><td>الراحة</td><td>{sleep_cell}</td><td>{sleep_note_cell}</td></tr>
+<tr><td>{stat_emoji("fullness", fullness)} الشبع</td><td>{fullness_cell}</td><td>{fullness_note}</td></tr>
+<tr><td>{stat_emoji("happiness", happiness)} السعادة</td><td>{happiness_cell}</td><td>{happiness_note}</td></tr>
+<tr><td>{stat_emoji("love", love)} الحب</td><td>{love_cell}</td><td>{love_note}</td></tr>
+<tr><td>{stat_emoji("trust", trust)} الثقة</td><td>{trust_cell}</td><td>{trust_note}</td></tr>
+<tr><td>{stat_emoji("boredom", boredom)} الملل</td><td>{boredom_cell}</td><td>{boredom_note}</td></tr>
+<tr><td>{stat_emoji("rest", sleep_need)} الراحة</td><td>{sleep_cell}</td><td>{sleep_note_cell}</td></tr>
 </table>
 <details>
 <summary>شنو تعني النسب؟</summary>
@@ -434,5 +497,6 @@ async def build_rich_card(
 {action_buttons_html}
 {sleep_note}
 {notice_html}
+<footer>🐈 السلالة: {html.escape(str(cat['breed']))} | #{html.escape(str(cat['id_number']))}</footer>
 """.strip()
     return InputRichMessage(html=html_markup, is_rtl=True, media=media_list)
