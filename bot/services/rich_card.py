@@ -9,7 +9,6 @@ from aiogram.types import (
 
 from bot.services.economy import ACTIVE_BREEDS
 from bot.services.cat_events import (
-    HIDE_SPOT_LABELS,
     active_cat_request,
     active_hiding,
     request_label,
