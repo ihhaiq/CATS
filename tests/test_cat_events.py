@@ -120,5 +120,20 @@ class CatEventTests(unittest.TestCase):
         self.assertTrue(visit_eligible(cat))
 
 
+
+    def test_away_cat_uses_shorter_visit_cooldown(self) -> None:
+        now = datetime.utcnow()
+
+        normal = base_cat()
+        normal["last_visit_at"] = (now - timedelta(hours=5)).isoformat()
+        self.assertFalse(visit_eligible(normal, now))
+
+        away = base_cat()
+        old = (now - timedelta(hours=5)).isoformat()
+        for key in ("last_fed", "last_played", "last_walk", "created_at"):
+            away[key] = old
+        away["last_visit_at"] = old
+        self.assertTrue(visit_eligible(away, now))
+
 if __name__ == "__main__":
     unittest.main()

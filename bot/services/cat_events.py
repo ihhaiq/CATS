@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from bot.services.local_store import (
     is_sleeping,
+    owner_is_away,
     parse_time,
     recommended_action,
     state_transaction,
@@ -43,6 +44,7 @@ REQUEST_MESSAGES = {
 }
 
 VISIT_COOLDOWN_HOURS = 18
+VISIT_AWAY_COOLDOWN_HOURS = 4
 VISIT_HISTORY_LIMIT = 12
 
 
@@ -266,11 +268,17 @@ def visit_eligible(cat: dict, moment: datetime | None = None) -> bool:
         return False
     if active_cat_request(cat, now):
         return False
+
+    cooldown_hours = (
+        VISIT_AWAY_COOLDOWN_HOURS
+        if owner_is_away(cat, now)
+        else VISIT_COOLDOWN_HOURS
+    )
     return (
-        _cooldown_ready(cat.get("last_visit_at"), VISIT_COOLDOWN_HOURS, now)
+        _cooldown_ready(cat.get("last_visit_at"), cooldown_hours, now)
         and _cooldown_ready(
             cat.get("last_visitor_at"),
-            VISIT_COOLDOWN_HOURS,
+            cooldown_hours,
             now,
         )
     )

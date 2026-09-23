@@ -23,6 +23,7 @@ from bot.services.local_store import (
     sleep_duration_text,
     sleep_need_percent,
     sleep_remaining_minutes,
+    TREAT_FULLNESS_THRESHOLD,
 )
 from bot.services.media_runtime import resolve_cat_media
 
@@ -82,7 +83,13 @@ async def build_rich_card(
             is_rtl=True,
         )
 
-    asset_kind = "play" if media_kind == "toy" else media_kind
+    asset_kind = (
+        "play"
+        if media_kind == "toy"
+        else "feed"
+        if media_kind == "treat"
+        else media_kind
+    )
     resolved = await resolve_cat_media(
         bot,
         cat,
@@ -112,6 +119,7 @@ async def build_rich_card(
         sleep_label = {
             "main": "نوم رئيسي",
             "nap": "قيلولة",
+            "away": "نومة طويلة لأنك مو يمها",
         }.get(sleep_kind, "نوم")
         remaining = sleep_duration_text(sleep_remaining_minutes(cat))
         sleep_note = (
@@ -209,6 +217,7 @@ async def build_rich_card(
 
     action_highlights = {
         "feed": {"fullness", "happiness", "love", "trust", "boredom"},
+        "treat": {"fullness", "happiness", "love", "boredom"},
         "play": {
             "fullness",
             "happiness",
@@ -372,6 +381,7 @@ async def build_rich_card(
 
     action_labels = {
         "feed": "🍖 إطعام",
+        "treat": "تحلية 🍬",
         "play": "🎾 لعب",
         "toy": "🧸 لعبة",
         "walk": "🌿 نزهة",
@@ -384,11 +394,17 @@ async def build_rich_card(
         if next_action
         else ""
     )
+    food_action = (
+        "treat"
+        if fullness >= TREAT_FULLNESS_THRESHOLD
+        else "feed"
+    )
     feed_label = (
         "⚡🍖 إطعام"
         if is_action_cooldown_bypassed(cat, "feed")
         else "🍖 إطعام"
     )
+    food_label = "تحلية 🍬" if food_action == "treat" else feed_label
     play_label = (
         "⚡🎾 لعب"
         if is_action_cooldown_bypassed(cat, "play")
@@ -427,7 +443,7 @@ async def build_rich_card(
     else:
         action_buttons_html = f"""
 <tg-button-row align="center">
-<tg-button type="callback_data" style="success" data="{action_data('feed')}">{feed_label}</tg-button>
+<tg-button type="callback_data" style="success" data="{action_data(food_action)}">{food_label}</tg-button>
 <tg-button type="callback_data" style="primary" data="{action_data('play')}">{play_label}</tg-button>
 <tg-button type="callback_data" data="{action_data('walk')}">{walk_label}</tg-button>
 </tg-button-row>

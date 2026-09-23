@@ -14,7 +14,9 @@ from bot.services.local_store import (
     defer_sleep_for_owner,
     notification_gap_seconds,
     finish_sleep,
+    fullness_percent,
     is_action_cooldown_bypassed,
+    owner_is_away,
     recommended_action,
     should_auto_sleep,
     sleep_plan,
@@ -744,6 +746,67 @@ class CoupledNeedsTests(unittest.TestCase):
         self.assertLess(cat["boredom"], 30)
         self.assertGreater(cat["happiness"], 70)
         self.assertIsNotNone(cat.get("last_solo_play_at"))
+
+
+    def test_thirty_one_percent_rest_uses_main_sleep(self) -> None:
+        cat = old_cat(0)
+        cat["rest_level"] = 31
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        kind, hours = sleep_plan(cat)
+        self.assertEqual(kind, "main")
+        self.assertGreaterEqual(hours, 3.0)
+
+    def test_owner_away_forces_long_sleep_even_when_rested(self) -> None:
+        cat = old_cat(5)
+        cat["rest_level"] = 95
+        cat["rest_updated_at"] = datetime.utcnow().isoformat()
+        self.assertTrue(owner_is_away(cat))
+        self.assertEqual(should_auto_sleep(cat), "away")
+
+        minutes = start_sleep(cat, kind_override="away")
+        self.assertEqual(cat["sleep_kind"], "away")
+        self.assertGreaterEqual(minutes, 5 * 60)
+        self.assertLessEqual(minutes, 8 * 60)
+        self.assertFalse(sleep_ready_to_finish(cat))
+
+    def test_away_sleep_raises_boredom_and_lowers_relationship_and_fullness(self) -> None:
+        cat = old_cat(0)
+        now = datetime.utcnow()
+        cat["hunger"] = 10
+        cat["love_bar"] = 80
+        cat["trust"] = 80
+        cat["boredom"] = 10
+        cat["last_decay_at"] = (now - timedelta(hours=4)).isoformat()
+        cat["rest_level"] = 80
+        cat["rest_updated_at"] = (now - timedelta(hours=4)).isoformat()
+        cat["sleep_started_at"] = (now - timedelta(hours=4)).isoformat()
+        cat["sleep_until"] = (now + timedelta(hours=1)).isoformat()
+        cat["sleep_kind"] = "away"
+        before_fullness = fullness_percent(cat)
+
+        apply_decay(cat)
+
+        self.assertGreater(cat["boredom"], 10)
+        self.assertLess(cat["love_bar"], 80)
+        self.assertLess(cat["trust"], 80)
+        self.assertLess(fullness_percent(cat), before_fullness)
+
+    def test_feed_reaches_treat_range_and_treat_finishes_fullness(self) -> None:
+        cat = old_cat(0)
+        cat["hunger"] = 88
+        cat["love_bar"] = 50
+        cat["boredom"] = 50
+
+        apply_care_effects(cat, "feed")
+        self.assertGreaterEqual(fullness_percent(cat), 75)
+
+        love_after_meal = cat["love_bar"]
+        boredom_after_meal = cat["boredom"]
+        apply_care_effects(cat, "treat")
+
+        self.assertEqual(fullness_percent(cat), 100)
+        self.assertGreaterEqual(cat["love_bar"], love_after_meal + 10)
+        self.assertLess(cat["boredom"], boredom_after_meal)
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ from bot.services.local_store import (
     get_cat_by_id,
     get_user_points,
     is_sleeping,
+    owner_is_away,
     update_cat,
     user_action_lock,
 )
@@ -29,6 +30,7 @@ logger = logging.getLogger("catibot.activity_sweep")
 HIDE_EVENT_CHANCE_PER_SWEEP = 0.006
 REQUEST_EVENT_CHANCE_PER_SWEEP = 0.010
 VISIT_EVENT_CHANCE_PER_SWEEP = 0.003
+VISIT_AWAY_EVENT_CHANCE_PER_SWEEP = 0.15
 
 
 async def _display_name(bot: Bot, user_id: int) -> str:
@@ -167,7 +169,12 @@ async def run_activity_sweep(bot: Bot) -> None:
         visitor_id = int(visitor.get("cat_id", 0))
         if visitor_id in used_cat_ids:
             continue
-        if random.random() >= VISIT_EVENT_CHANCE_PER_SWEEP:
+        visit_chance = (
+            VISIT_AWAY_EVENT_CHANCE_PER_SWEEP
+            if owner_is_away(visitor)
+            else VISIT_EVENT_CHANCE_PER_SWEEP
+        )
+        if random.random() >= visit_chance:
             continue
 
         hosts = [
