@@ -31,6 +31,7 @@ from bot.services.local_store import (
   sleep_remaining_minutes,
   stubborn_care_refusal_reason,
   stubborn_refusal_text,
+  TREAT_FULLNESS_THRESHOLD,
   update_cat,
   user_action_lock,
 )
@@ -41,6 +42,11 @@ router = Router(name="care")
 @router.message(Command("feed", "اطعام", "إطعام"))
 async def cmd_feed(message: Message) -> None:
   await _care(message, "feed")
+
+
+@router.message(Command("treat", "تحلية", "حلو"))
+async def cmd_treat(message: Message) -> None:
+  await _care(message, "treat")
 
 
 @router.message(Command("play", "لعب"))
@@ -108,6 +114,11 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     )
     return
 
+  if action == "treat" and fullness_percent(cat) < TREAT_FULLNESS_THRESHOLD:
+    await update_cat(cat)
+    await message.answer("🍬 التحلية تظهر من يصير الشبع 75% وفوك.")
+    return
+
   block_reason = action_block_reason(cat, action)
   if block_reason:
     await update_cat(cat)
@@ -123,11 +134,12 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     await message.answer(stubborn_refusal_text(action, refusal_reason))
     return
 
-  if action in {"play", "toy", "walk", "talk", "relax"}:
+  if action in {"treat", "play", "toy", "walk", "talk", "relax"}:
     defer_sleep_for_owner(cat)
 
   timestamp_key = {
     "feed": "last_fed",
+    "treat": "last_treat",
     "play": "last_played",
     "toy": "last_toy",
     "walk": "last_walk",
@@ -136,6 +148,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   }[action]
   cooldown = {
     "feed": settings.feed_cooldown,
+    "treat": settings.treat_cooldown,
     "play": settings.play_cooldown,
     "toy": settings.toy_cooldown,
     "walk": settings.walk_cooldown,
@@ -163,6 +176,8 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   if action == "feed":
     text = "🍖 أكلت القطة وصارت أهدأ وأسعد"
+  elif action == "treat":
+    text = "🍬 أخذت التحلية؛ شبعت أكثر، حبها زاد هواية ومللها نزل"
   elif action == "play":
     if int(cat.get("same_action_streak", 1)) >= 5:
       text = "😾 ملت من نفس اللعب؛ غيّر النشاط وياها"
