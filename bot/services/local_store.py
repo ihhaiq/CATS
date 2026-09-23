@@ -1,6 +1,7 @@
 """PostgreSQL-backed runtime state and cat game logic."""
 import asyncio
 import copy
+import random
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 
@@ -71,6 +72,22 @@ def is_sleeping(cat: dict) -> bool:
     return bool(sleep_until and parse_time(sleep_until) > datetime.utcnow())
 
 
+def stubbornly_refuses_sleep(cat: dict, *, roll: float | None = None) -> bool:
+    """Sometimes refuse a manual sleep request for a playful stubborn moment."""
+    if is_sleeping(cat):
+        return False
+    value = random.random() if roll is None else float(roll)
+    return value < STUBBORN_SLEEP_CHANCE
+
+
+def stubbornly_refuses_wake(cat: dict, *, roll: float | None = None) -> bool:
+    """Sometimes refuse a manual wake request while an active sleep is running."""
+    if not is_sleeping(cat):
+        return False
+    value = random.random() if roll is None else float(roll)
+    return value < STUBBORN_WAKE_CHANCE
+
+
 def sleep_remaining_minutes(cat: dict) -> int:
     sleep_until = cat.get("sleep_until")
     if not sleep_until:
@@ -120,6 +137,8 @@ OWNER_SLEEP_RESIST_MINUTES = 30
 SOLO_WAKE_LOVE_PENALTY = 1
 SOLO_WAKE_BOREDOM_RELIEF = 8
 SOLO_WAKE_HAPPINESS_GAIN = 3
+STUBBORN_SLEEP_CHANCE = 0.20
+STUBBORN_WAKE_CHANCE = 0.20
 
 
 def _sleep_overlap_hours(cat: dict, start: datetime, end: datetime) -> float:
@@ -785,7 +804,7 @@ def apply_care_effects(cat: dict, action: str) -> None:
 
     meaningful = True
     if action == "feed":
-        meaningful = hunger_before >= 35
+        meaningful = hunger_before >= 30
         if meaningful:
             cat["hunger"] = max(0, hunger_before - 40)
             boredom_drop = 10
