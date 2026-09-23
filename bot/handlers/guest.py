@@ -33,6 +33,8 @@ from bot.services.local_store import (
     sleep_need_percent,
     sleep_remaining_minutes,
     start_sleep,
+    stubborn_care_refusal_reason,
+    stubborn_refusal_text,
     stubbornly_refuses_sleep,
     stubbornly_refuses_wake,
     update_cat,
@@ -402,6 +404,31 @@ async def _guest_message_locked(message: Message) -> None:
                         input_message_content=InputRichMessageContent(rich_message=card),
                     )
                     await message.bot.answer_guest_query(message.guest_query_id, result)
+                    return
+
+                refusal_reason = stubborn_care_refusal_reason(cat, action)
+                if refusal_reason:
+                    refusal_text = stubborn_refusal_text(action, refusal_reason)
+                    await update_cat(cat)
+                    card = await _build_guest_card(
+                        message,
+                        caller,
+                        dict(cat, action_notice=refusal_text),
+                        await get_user_points(user_id),
+                        "cat_angry_sleep",
+                    )
+                    result = InlineQueryResultArticle(
+                        id=f"guest-{action}-stubborn",
+                        title="😾 عاندت القطة",
+                        description=refusal_text,
+                        input_message_content=InputRichMessageContent(
+                            rich_message=card,
+                        ),
+                    )
+                    await message.bot.answer_guest_query(
+                        message.guest_query_id,
+                        result,
+                    )
                     return
 
                 timestamp_key = {
