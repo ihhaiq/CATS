@@ -12,7 +12,12 @@ except ModuleNotFoundError:
 
 from bot.config import settings
 from bot.services.activity_sweep import run_activity_sweep
-from bot.services.cat_events import active_cat_request, active_hiding
+from bot.services.cat_events import (
+   active_boredom_escape,
+   active_cat_request,
+   active_hiding,
+   finish_boredom_escape_if_ready,
+)
 from bot.services.media_runtime import resolve_cat_media
 from bot.services.local_store import (
    apply_decay,
@@ -174,6 +179,29 @@ async def _send_wake_notice(bot: Bot, cat: dict) -> bool:
    return False
 
 
+async def _send_boredom_return_notice(bot: Bot, cat: dict) -> None:
+   message = (
+      "🐈 رجعت قطتك بعد ما هربت من الملل ولعبت ويا قطة ثانية.\n"
+      "😺 رجعت أهدأ ومللها نزل."
+   )
+   for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
+      try:
+         await _send_need_notice(
+            bot,
+            cat,
+            user_id,
+            message,
+            [],
+            visual_state="happy",
+         )
+      except Exception as exc:
+         logger.warning(
+            "Failed to send boredom return notice user_id=%s: %s",
+            user_id,
+            exc,
+         )
+
+
 async def _send_fled_notice(bot: Bot, cat: dict) -> None:
    message = "💨 قطتك هربت بسبب الإهمال."
    for user_id in {cat["owner_id"], cat.get("partner_id")} - {None}:
@@ -240,6 +268,16 @@ async def _sweep(bot: Bot) -> None:
                await _send_fled_notice(bot, cat)
                await update_cat(cat)
                continue
+
+            returned_from_boredom_escape = finish_boredom_escape_if_ready(cat)
+            if returned_from_boredom_escape:
+               cat["last_notified_state"] = None
+               cat["last_notified_at"] = None
+               await _send_boredom_return_notice(bot, cat)
+            elif active_boredom_escape(cat):
+               await update_cat(cat)
+               continue
+
             woke = finish_sleep(cat)
             if woke:
                cat["last_notified_state"] = None
