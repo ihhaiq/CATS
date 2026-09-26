@@ -146,8 +146,7 @@ async def _send_boredom_escape_notifications(
     visitor_message = (
         f"🌀 الملل وصل مرحلة عالية، فـ <b>{visitor_cat}</b> هربت من البيت "
         f"وراحت تدور قطة تلعب وياها. لقت قطة <b>{host_owner}</b> — "
-        f"<b>{host_cat}</b>.
-"
+        f"<b>{host_cat}</b>.\n"
         f"🐾 راح تتأخر بالرجعة؛ تقريباً <b>{duration}</b>."
     )
     host_message = (
