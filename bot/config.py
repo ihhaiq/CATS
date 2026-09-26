@@ -27,8 +27,28 @@ class Settings:
 
     webhook_base_url: str = os.getenv("WEBHOOK_BASE_URL", "")
     webhook_path: str = os.getenv("WEBHOOK_PATH", "/webhook")
+    asset_base_url: str = os.getenv("ASSET_BASE_URL", "").strip()
+    railway_public_domain: str = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
     port: int = int(os.getenv("PORT", "8080"))
     admin_ids: list[int] | None = None
+
+    @property
+    def public_asset_base_url(self) -> str:
+        """Public HTTPS origin used by Telegram to fetch cat preview images."""
+        explicit = self.asset_base_url.rstrip("/")
+        if explicit:
+            return explicit
+
+        webhook = self.webhook_base_url.rstrip("/")
+        if webhook:
+            return webhook
+
+        domain = self.railway_public_domain.strip().strip("/")
+        if not domain:
+            return ""
+        if domain.startswith(("http://", "https://")):
+            return domain.rstrip("/")
+        return f"https://{domain}"
 
     feed_cooldown: int = 15 * 60
     treat_cooldown: int = 30 * 60
