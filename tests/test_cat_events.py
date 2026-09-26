@@ -4,14 +4,17 @@ from datetime import datetime, timedelta
 
 from bot.services.cat_events import (
     active_boredom_escape,
+    active_boredom_host_busy,
     active_cat_request,
     active_hiding,
     boredom_escape_remaining_minutes,
+    boredom_host_busy_remaining_minutes,
     can_start_boredom_escape,
     call_hidden_cat,
     can_start_hiding,
     can_start_request,
     finish_boredom_escape_if_ready,
+    finish_boredom_host_busy_if_ready,
     fulfill_cat_request,
     ignore_cat_request,
     search_hidden_cat,
@@ -158,6 +161,50 @@ class CatEventTests(unittest.TestCase):
         self.assertEqual(cat["boredom"], 33)
         self.assertEqual(cat["last_boredom_escape_peer_cat_id"], 2)
         self.assertEqual(cat["last_boredom_escape_peer_owner_id"], 22)
+
+    def test_host_cat_is_busy_until_escape_visit_ends(self) -> None:
+        now = datetime.utcnow()
+        cat = base_cat()
+        cat["boredom_host_busy_started_at"] = now.isoformat()
+        cat["boredom_host_busy_until"] = (
+            now + timedelta(minutes=120)
+        ).isoformat()
+        cat["boredom_host_peer_cat_id"] = 2
+        cat["boredom_host_peer_owner_id"] = 22
+        cat["boredom_host_peer_cat_name"] = "سمسم"
+
+        self.assertTrue(
+            active_boredom_host_busy(cat, now + timedelta(minutes=30))
+        )
+        self.assertEqual(
+            boredom_host_busy_remaining_minutes(
+                cat,
+                now + timedelta(minutes=30),
+            ),
+            90,
+        )
+        self.assertFalse(
+            can_start_boredom_escape(cat, now + timedelta(minutes=30))
+        )
+        self.assertFalse(
+            visit_eligible(cat, now + timedelta(minutes=30))
+        )
+        self.assertFalse(
+            finish_boredom_host_busy_if_ready(
+                cat,
+                now + timedelta(minutes=119),
+            )
+        )
+        self.assertTrue(
+            finish_boredom_host_busy_if_ready(
+                cat,
+                now + timedelta(minutes=121),
+            )
+        )
+        self.assertFalse(
+            active_boredom_host_busy(cat, now + timedelta(minutes=121))
+        )
+        self.assertEqual(cat["last_boredom_host_peer_cat_name"], "سمسم")
 
     def test_visit_eligibility_respects_both_visit_directions(self) -> None:
         cat = base_cat()
