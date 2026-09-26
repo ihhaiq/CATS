@@ -6,9 +6,13 @@ import random
 from aiogram import Bot
 
 from bot.services.cat_events import (
+    active_boredom_escape,
+    active_cat_request,
     active_hiding,
+    can_start_boredom_escape,
     can_start_hiding,
     can_start_request,
+    record_boredom_escape,
     record_cat_visit,
     start_cat_request,
     start_hiding,
@@ -67,7 +71,12 @@ async def _start_personal_event(bot: Bot, snapshot: dict) -> bool:
     owner_id = int(snapshot["owner_id"])
     async with user_action_lock(owner_id):
         cat = await get_cat_by_id(snapshot["cat_id"], include_fled=True)
-        if cat is None or cat.get("is_fled") or is_sleeping(cat):
+        if (
+            cat is None
+            or cat.get("is_fled")
+            or is_sleeping(cat)
+            or active_boredom_escape(cat)
+        ):
             return False
 
         if (
@@ -107,6 +116,97 @@ async def _start_personal_event(bot: Bot, snapshot: dict) -> bool:
                 )
             return True
 
+    return False
+
+
+def _duration_text(minutes: int) -> str:
+    minutes = max(1, int(minutes))
+    if minutes < 60:
+        return f"{minutes} دقيقة"
+    hours, remainder = divmod(minutes, 60)
+    if remainder:
+        return f"{hours} ساعة و{remainder} دقيقة"
+    return f"{hours} ساعة"
+
+
+async def _send_boredom_escape_notifications(
+    bot: Bot,
+    visitor: dict,
+    host: dict,
+    duration_minutes: int,
+) -> None:
+    visitor_owner_id = int(visitor["owner_id"])
+    host_owner_id = int(host["owner_id"])
+    visitor_owner = html.escape(await _display_name(bot, visitor_owner_id))
+    host_owner = html.escape(await _display_name(bot, host_owner_id))
+    visitor_cat = html.escape(str(visitor.get("name", "قطتك")))
+    host_cat = html.escape(str(host.get("name", "قطتهم")))
+    duration = _duration_text(duration_minutes)
+
+    visitor_message = (
+        f"🌀 الملل وصل مرحلة عالية، فـ <b>{visitor_cat}</b> هربت من البيت "
+        f"وراحت تدور قطة تلعب وياها. لقت قطة <b>{host_owner}</b> — "
+        f"<b>{host_cat}</b>.
+"
+        f"🐾 راح تتأخر بالرجعة؛ تقريباً <b>{duration}</b>."
+    )
+    host_message = (
+        f"🐾 قطة <b>{visitor_owner}</b> — <b>{visitor_cat}</b> "
+        f"هربت من الملل وجت تلعب ويا <b>{host_cat}</b>."
+    )
+
+    for user_id, message in (
+        (visitor_owner_id, visitor_message),
+        (host_owner_id, host_message),
+    ):
+        try:
+            await bot.send_message(user_id, message)
+        except Exception as exc:
+            logger.warning(
+                "Failed to send boredom escape notice user_id=%s: %s",
+                user_id,
+                exc,
+            )
+
+
+async def _start_boredom_escape_event(
+    bot: Bot,
+    snapshot: dict,
+    candidates: list[dict],
+) -> bool:
+    owner_id = int(snapshot["owner_id"])
+    async with user_action_lock(owner_id):
+        cat = await get_cat_by_id(snapshot["cat_id"], include_fled=True)
+        if cat is None or not can_start_boredom_escape(cat):
+            return False
+
+        hosts = [
+            item
+            for item in candidates
+            if int(item.get("cat_id", 0)) != int(cat.get("cat_id", 0))
+            and int(item.get("owner_id", 0)) != owner_id
+            and not item.get("is_fled")
+            and not is_sleeping(item)
+            and not active_hiding(item)
+            and not active_cat_request(item)
+            and not active_boredom_escape(item)
+        ]
+        random.shuffle(hosts)
+        for host in hosts:
+            recorded = await record_boredom_escape(
+                int(cat["cat_id"]),
+                int(host["cat_id"]),
+            )
+            if recorded is None:
+                continue
+            saved_visitor, saved_host, duration = recorded
+            await _send_boredom_escape_notifications(
+                bot,
+                saved_visitor,
+                saved_host,
+                duration,
+            )
+            return True
     return False
 
 
@@ -151,7 +251,20 @@ async def run_activity_sweep(bot: Bot) -> None:
     if not snapshots:
         return
 
+    # Extreme boredom takes priority over routine hiding/requests/visits.
     for snapshot in snapshots:
+        if not can_start_boredom_escape(snapshot):
+            continue
+        try:
+            await _start_boredom_escape_event(bot, snapshot, snapshots)
+        except Exception:
+            logger.exception(
+                "Boredom escape event failed cat_id=%s",
+                snapshot.get("cat_id"),
+            )
+
+    refreshed_for_personal = await get_active_cats()
+    for snapshot in refreshed_for_personal:
         try:
             await _start_personal_event(bot, snapshot)
         except Exception:
