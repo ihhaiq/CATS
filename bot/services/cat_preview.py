@@ -14,6 +14,7 @@ from bot.services.cat_assets import (
     resolve_cat_visual_state,
     resolve_local_asset,
 )
+from bot.services.cat_events import active_hiding
 
 logger = logging.getLogger("catibot.cat_preview")
 ASSET_ROUTE_PREFIX = "/cat-assets"
@@ -28,12 +29,16 @@ def cat_preview_url(
 ) -> str:
     """Return a public URL for the local PNG that represents this cat state."""
     breed = str(cat.get("breed") or "")
-    if not breed or breed == "black":
+    if not breed or breed == "black" or active_hiding(cat):
         return ""
 
+    asset_state = {
+        "toy": "play",
+        "treat": "feed",
+    }.get(requested_state, requested_state)
     visual_state = resolve_cat_visual_state(
         cat,
-        requested_state,
+        asset_state,
         hunger_threshold=settings.hunger_alert_threshold,
     )
     age_stage = get_age_stage(cat.get("age_days", 30))
