@@ -7,6 +7,7 @@ from aiogram import Bot
 
 from bot.services.cat_events import (
     active_boredom_escape,
+    active_boredom_host_busy,
     active_cat_request,
     active_hiding,
     can_start_boredom_escape,
@@ -76,6 +77,7 @@ async def _start_personal_event(bot: Bot, snapshot: dict) -> bool:
             or cat.get("is_fled")
             or is_sleeping(cat)
             or active_boredom_escape(cat)
+            or active_boredom_host_busy(cat)
         ):
             return False
 
@@ -189,6 +191,7 @@ async def _start_boredom_escape_event(
             and not active_hiding(item)
             and not active_cat_request(item)
             and not active_boredom_escape(item)
+            and not active_boredom_host_busy(item)
         ]
         random.shuffle(hosts)
         for host in hosts:
