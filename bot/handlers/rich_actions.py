@@ -52,6 +52,7 @@ from bot.services.local_store import (
     user_action_lock,
     wake_now,
 )
+from bot.services.cat_preview import sync_cat_preview
 from bot.services.rich_card import build_fled_card, build_rich_card
 
 router = Router(name="rich_actions")
@@ -60,12 +61,21 @@ logger = logging.getLogger("catibot.rich_actions")
 
 async def _build_card(query: CallbackQuery, cat: dict, points: int, state: str = "status"):
     upload_chat_id = query.message.chat.id if query.message else query.from_user.id
+    preview_ok = False
+    if query.message and not query.inline_message_id:
+        preview_ok = await sync_cat_preview(
+            query.bot,
+            query.message.chat.id,
+            cat,
+            state,
+        )
     return await build_rich_card(
         query.bot,
         cat,
         points,
         state,
         upload_chat_id=upload_chat_id,
+        embed_media=not preview_ok,
     )
 
 

@@ -46,6 +46,7 @@ async def build_rich_card(
     media_kind: str = "status",
     *,
     upload_chat_id: int | str | None = None,
+    embed_media: bool = True,
 ) -> InputRichMessage:
     cat_id = cat.get("cat_id")
 
@@ -90,12 +91,14 @@ async def build_rich_card(
         if media_kind == "treat"
         else media_kind
     )
-    resolved = await resolve_cat_media(
-        bot,
-        cat,
-        asset_kind,
-        upload_chat_id=upload_chat_id,
-    )
+    resolved = None
+    if embed_media:
+        resolved = await resolve_cat_media(
+            bot,
+            cat,
+            asset_kind,
+            upload_chat_id=upload_chat_id,
+        )
 
     media_markup = ""
     media_list = []
@@ -110,7 +113,7 @@ async def build_rich_card(
             media_item = InputRichMessageMedia(id="cat_photo", media=media)
             media_list.append(media_item)
             media_markup = '<img src="tg://photo?id=cat_photo"/>'
-    elif cat.get("breed") != "black":
+    elif embed_media and cat.get("breed") != "black":
         media_markup = "<p>الصورة الواقعية ستظهر بعد إضافة ملف القطة.</p>"
 
     sleeping = is_sleeping(cat)

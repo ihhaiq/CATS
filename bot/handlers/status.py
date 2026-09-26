@@ -13,6 +13,7 @@ from bot.services.local_store import (
   update_cat,
   user_action_lock,
 )
+from bot.services.cat_preview import sync_cat_preview
 from bot.services.rich_card import build_fled_card, build_rich_card
 
 router = Router(name="status")
@@ -45,6 +46,13 @@ async def _cmd_status_locked(message: Message, user_id: int) -> None:
     await message.answer("💨 القطة هربت بسبب الإهمال.")
     return
   await update_cat(cat)
+  preview_ok = await sync_cat_preview(
+    message.bot,
+    message.chat.id,
+    cat,
+    "status",
+    force_new=True,
+  )
   await message.bot.send_rich_message(
     chat_id=message.chat.id,
     rich_message=await build_rich_card(
@@ -53,5 +61,6 @@ async def _cmd_status_locked(message: Message, user_id: int) -> None:
       await get_user_points(user_id),
       "status",
       upload_chat_id=message.chat.id,
+      embed_media=not preview_ok,
     ),
   )
