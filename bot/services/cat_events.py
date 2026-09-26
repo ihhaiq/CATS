@@ -465,6 +465,8 @@ def visit_eligible(cat: dict, moment: datetime | None = None) -> bool:
     now = _now(moment)
     if cat.get("is_fled") or is_sleeping(cat) or active_hiding(cat, now):
         return False
+    if active_boredom_escape(cat, now):
+        return False
     if active_cat_request(cat, now):
         return False
 
