@@ -3,7 +3,10 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from bot.services.cat_events import finish_boredom_escape_if_ready
+from bot.services.cat_events import (
+  finish_boredom_escape_if_ready,
+  finish_boredom_host_busy_if_ready,
+)
 
 from bot.services.local_store import (
   apply_decay,
@@ -43,6 +46,7 @@ async def _cmd_status_locked(message: Message, user_id: int) -> None:
   apply_decay(cat)
   finish_sleep(cat, owner_present=True)
   finish_boredom_escape_if_ready(cat)
+  finish_boredom_host_busy_if_ready(cat)
   if cat.get("is_fled"):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")

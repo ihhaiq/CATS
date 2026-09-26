@@ -90,7 +90,7 @@ def can_start_hiding(cat: dict, moment: datetime | None = None) -> bool:
     now = _now(moment)
     if cat.get("is_fled") or is_sleeping(cat) or active_hiding(cat, now):
         return False
-    if active_boredom_escape(cat, now):
+    if active_boredom_escape(cat, now) or active_boredom_host_busy(cat, now):
         return False
     if active_cat_request(cat, now):
         return False
@@ -189,7 +189,7 @@ def can_start_request(cat: dict, moment: datetime | None = None) -> bool:
     now = _now(moment)
     if cat.get("is_fled") or is_sleeping(cat) or active_hiding(cat, now):
         return False
-    if active_boredom_escape(cat, now):
+    if active_boredom_escape(cat, now) or active_boredom_host_busy(cat, now):
         return False
     if active_cat_request(cat, now):
         return False
@@ -298,6 +298,68 @@ def boredom_escape_remaining_minutes(
     return int((seconds + 59) // 60)
 
 
+def active_boredom_host_busy(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    """Whether this cat is busy playing with a boredom-escape visitor."""
+    now = _now(moment)
+    return bool(
+        cat.get("boredom_host_busy_started_at")
+        and _future(cat.get("boredom_host_busy_until"), now)
+    )
+
+
+def boredom_host_busy_remaining_minutes(
+    cat: dict,
+    moment: datetime | None = None,
+) -> int:
+    if not active_boredom_host_busy(cat, moment):
+        return 0
+    now = _now(moment)
+    seconds = max(
+        0.0,
+        (parse_time(cat["boredom_host_busy_until"]) - now).total_seconds(),
+    )
+    return int((seconds + 59) // 60)
+
+
+def finish_boredom_host_busy_if_ready(
+    cat: dict,
+    moment: datetime | None = None,
+) -> bool:
+    """Release a host cat once the visiting cat's play session ends."""
+    started = cat.get("boredom_host_busy_started_at")
+    until = cat.get("boredom_host_busy_until")
+    if not started or not until:
+        return False
+
+    now = _now(moment)
+    try:
+        if parse_time(until) > now:
+            return False
+    except (TypeError, ValueError):
+        pass
+
+    peer_cat_id = cat.get("boredom_host_peer_cat_id")
+    peer_owner_id = cat.get("boredom_host_peer_owner_id")
+    peer_cat_name = cat.get("boredom_host_peer_cat_name")
+    cat.pop("boredom_host_busy_started_at", None)
+    cat.pop("boredom_host_busy_until", None)
+    cat.pop("boredom_host_peer_cat_id", None)
+    cat.pop("boredom_host_peer_owner_id", None)
+    cat.pop("boredom_host_peer_cat_name", None)
+    cat["last_boredom_host_session_at"] = now.isoformat()
+    if peer_cat_id is not None:
+        cat["last_boredom_host_peer_cat_id"] = int(peer_cat_id)
+    if peer_owner_id is not None:
+        cat["last_boredom_host_peer_owner_id"] = int(peer_owner_id)
+    if peer_cat_name:
+        cat["last_boredom_host_peer_cat_name"] = str(peer_cat_name)
+    cat["last_social_at"] = now.isoformat()
+    return True
+
+
 def can_start_boredom_escape(
     cat: dict,
     moment: datetime | None = None,
@@ -308,7 +370,11 @@ def can_start_boredom_escape(
         return False
     if cat.get("is_fled") or is_sleeping(cat) or active_hiding(cat, now):
         return False
-    if active_boredom_escape(cat, now) or active_cat_request(cat, now):
+    if (
+        active_boredom_escape(cat, now)
+        or active_boredom_host_busy(cat, now)
+        or active_cat_request(cat, now)
+    ):
         return False
     return _cooldown_ready(
         cat.get("last_boredom_escape_at"),
@@ -433,6 +499,7 @@ async def record_boredom_escape(
             or active_hiding(host, now)
             or active_cat_request(host, now)
             or active_boredom_escape(host, now)
+            or active_boredom_host_busy(host, now)
         ):
             return None
 
@@ -442,6 +509,13 @@ async def record_boredom_escape(
             peer_owner_id=int(host.get("owner_id", 0)),
             moment=now,
             duration_minutes=duration_minutes,
+        )
+        host["boredom_host_busy_started_at"] = now.isoformat()
+        host["boredom_host_busy_until"] = visitor["boredom_escape_until"]
+        host["boredom_host_peer_cat_id"] = int(visitor_cat_id)
+        host["boredom_host_peer_owner_id"] = int(visitor.get("owner_id", 0))
+        host["boredom_host_peer_cat_name"] = str(
+            visitor.get("name", "قطة ثانية")
         )
         host["last_social_at"] = now.isoformat()
         host["happiness"] = min(
@@ -465,7 +539,7 @@ def visit_eligible(cat: dict, moment: datetime | None = None) -> bool:
     now = _now(moment)
     if cat.get("is_fled") or is_sleeping(cat) or active_hiding(cat, now):
         return False
-    if active_boredom_escape(cat, now):
+    if active_boredom_escape(cat, now) or active_boredom_host_busy(cat, now):
         return False
     if active_cat_request(cat, now):
         return False

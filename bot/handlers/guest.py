@@ -11,9 +11,12 @@ from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, Inp
 from bot.config import settings
 from bot.services.cat_events import (
     active_boredom_escape,
+    active_boredom_host_busy,
     active_hiding,
     boredom_escape_remaining_minutes,
+    boredom_host_busy_remaining_minutes,
     finish_boredom_escape_if_ready,
+    finish_boredom_host_busy_if_ready,
     fulfill_cat_request,
 )
 from bot.services.economy import assign_random_breed, check_cooldown
@@ -342,6 +345,7 @@ async def _guest_message_locked(message: Message) -> None:
             apply_decay(cat)
             woke = finish_sleep(cat, owner_present=True)
             finish_boredom_escape_if_ready(cat)
+            finish_boredom_host_busy_if_ready(cat)
             await update_cat(cat)
             if cat.get("is_fled"):
                 result = InlineQueryResultArticle(
@@ -362,6 +366,34 @@ async def _guest_message_locked(message: Message) -> None:
                     id="guest-boredom-escape",
                     title="🌀 قطتك هربت من الملل",
                     description=f"بعدها ما رجعت؛ باقي تقريباً {remaining}.",
+                    input_message_content=InputRichMessageContent(
+                        rich_message=await _build_guest_card(
+                            message,
+                            caller,
+                            cat,
+                            await get_user_points(user_id),
+                            "status",
+                        ),
+                    ),
+                )
+                await message.bot.answer_guest_query(
+                    message.guest_query_id,
+                    result,
+                )
+                return
+            if active_boredom_host_busy(cat):
+                remaining = sleep_duration_text(
+                    boredom_host_busy_remaining_minutes(cat)
+                )
+                peer_name = str(
+                    cat.get("boredom_host_peer_cat_name", "قطة ثانية")
+                )
+                result = InlineQueryResultArticle(
+                    id="guest-boredom-host-busy",
+                    title="🎾 قطتك مشغولة",
+                    description=(
+                        f"تلعب ويا قطة {peer_name}؛ باقي تقريباً {remaining}."
+                    ),
                     input_message_content=InputRichMessageContent(
                         rich_message=await _build_guest_card(
                             message,

@@ -14,9 +14,11 @@ from bot.config import settings
 from bot.services.activity_sweep import run_activity_sweep
 from bot.services.cat_events import (
    active_boredom_escape,
+   active_boredom_host_busy,
    active_cat_request,
    active_hiding,
    finish_boredom_escape_if_ready,
+   finish_boredom_host_busy_if_ready,
 )
 from bot.services.media_runtime import resolve_cat_media
 from bot.services.local_store import (
@@ -275,6 +277,11 @@ async def _sweep(bot: Bot) -> None:
                cat["last_notified_at"] = None
                await _send_boredom_return_notice(bot, cat)
             elif active_boredom_escape(cat):
+               await update_cat(cat)
+               continue
+
+            finish_boredom_host_busy_if_ready(cat)
+            if active_boredom_host_busy(cat):
                await update_cat(cat)
                continue
 
