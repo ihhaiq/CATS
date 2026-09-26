@@ -5,7 +5,13 @@ from aiogram.types import Message
 from datetime import datetime
 
 from bot.config import settings
-from bot.services.cat_events import active_hiding, fulfill_cat_request
+from bot.services.cat_events import (
+  active_boredom_escape,
+  active_hiding,
+  boredom_escape_remaining_minutes,
+  finish_boredom_escape_if_ready,
+  fulfill_cat_request,
+)
 from bot.services.economy import check_cooldown
 from bot.services.local_store import (
   action_block_reason,
@@ -94,10 +100,22 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   apply_decay(cat)
   finish_sleep(cat, owner_present=True)
+  finish_boredom_escape_if_ready(cat)
   if mark_fled_if_needed(cat):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")
     return
+  if active_boredom_escape(cat):
+    await update_cat(cat)
+    remaining = sleep_duration_text(
+      boredom_escape_remaining_minutes(cat)
+    )
+    await message.answer(
+      f"🌀 قطتك هربت من الملل وراحت تلعب ويا قطة ثانية. "
+      f"بعدها ما رجعت؛ باقي تقريباً {remaining}."
+    )
+    return
+
   if is_sleeping(cat):
     await update_cat(cat)
     remaining = sleep_duration_text(sleep_remaining_minutes(cat))

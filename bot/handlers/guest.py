@@ -9,7 +9,13 @@ from aiogram import Router
 from aiogram.types import InlineQueryResultArticle, InputRichMessageContent, InputTextMessageContent, Message
 
 from bot.config import settings
-from bot.services.cat_events import active_hiding, fulfill_cat_request
+from bot.services.cat_events import (
+    active_boredom_escape,
+    active_hiding,
+    boredom_escape_remaining_minutes,
+    finish_boredom_escape_if_ready,
+    fulfill_cat_request,
+)
 from bot.services.economy import assign_random_breed, check_cooldown
 from bot.services.local_store import (
     action_block_reason,
@@ -335,6 +341,7 @@ async def _guest_message_locked(message: Message) -> None:
         else:
             apply_decay(cat)
             woke = finish_sleep(cat, owner_present=True)
+            finish_boredom_escape_if_ready(cat)
             await update_cat(cat)
             if cat.get("is_fled"):
                 result = InlineQueryResultArticle(
@@ -346,6 +353,29 @@ async def _guest_message_locked(message: Message) -> None:
                     ),
                 )
                 await message.bot.answer_guest_query(message.guest_query_id, result)
+                return
+            if active_boredom_escape(cat):
+                remaining = sleep_duration_text(
+                    boredom_escape_remaining_minutes(cat)
+                )
+                result = InlineQueryResultArticle(
+                    id="guest-boredom-escape",
+                    title="🌀 قطتك هربت من الملل",
+                    description=f"بعدها ما رجعت؛ باقي تقريباً {remaining}.",
+                    input_message_content=InputRichMessageContent(
+                        rich_message=await _build_guest_card(
+                            message,
+                            caller,
+                            cat,
+                            await get_user_points(user_id),
+                            "status",
+                        ),
+                    ),
+                )
+                await message.bot.answer_guest_query(
+                    message.guest_query_id,
+                    result,
+                )
                 return
             if action == "status":
                 result = InlineQueryResultArticle(
