@@ -13,9 +13,12 @@ from bot.config import settings
 from bot.services.cat_events import (
     HIDE_SPOT_LABELS,
     active_boredom_escape,
+    active_boredom_host_busy,
     active_hiding,
     boredom_escape_remaining_minutes,
+    boredom_host_busy_remaining_minutes,
     finish_boredom_escape_if_ready,
+    finish_boredom_host_busy_if_ready,
     call_hidden_cat,
     fulfill_cat_request,
     ignore_cat_request,
@@ -204,6 +207,7 @@ async def _handle_rich_action_locked(
     apply_decay(cat)
     woke = finish_sleep(cat, owner_present=True)
     finish_boredom_escape_if_ready(cat)
+    finish_boredom_host_busy_if_ready(cat)
     if cat.get("is_fled"):
         await update_cat(cat)
         await _edit_card(query, build_fled_card(cat))
@@ -228,6 +232,27 @@ async def _handle_rich_action_locked(
         )
         await query.answer(
             f"🌀 بعدها ما رجعت؛ باقي تقريباً {remaining}.",
+            show_alert=action != "status",
+        )
+        return
+
+    if active_boredom_host_busy(cat):
+        await update_cat(cat)
+        await _edit_card(
+            query,
+            await _build_card(
+                query,
+                cat,
+                await get_user_points(user_id),
+                "status",
+            ),
+        )
+        remaining = sleep_duration_text(
+            boredom_host_busy_remaining_minutes(cat)
+        )
+        peer_name = str(cat.get("boredom_host_peer_cat_name", "قطة ثانية"))
+        await query.answer(
+            f"🎾 مشغولة تلعب ويا قطة {peer_name}. باقي تقريباً {remaining}.",
             show_alert=action != "status",
         )
         return
