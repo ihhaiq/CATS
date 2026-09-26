@@ -9,8 +9,10 @@ from aiogram.types import (
 
 from bot.services.economy import ACTIVE_BREEDS
 from bot.services.cat_events import (
+    active_boredom_escape,
     active_cat_request,
     active_hiding,
+    boredom_escape_remaining_minutes,
     request_label,
     request_message,
 )
@@ -51,6 +53,27 @@ async def build_rich_card(
 
     def action_data(action: str) -> str:
         return f"cat:{cat_id}:{action}" if cat_id else f"cat:{action}"
+
+    if active_boredom_escape(cat):
+        name = html.escape(str(cat.get("name", "قطتك")))
+        breed = html.escape(str(cat.get("breed", "")))
+        number = html.escape(str(cat.get("id_number", "")))
+        remaining = sleep_duration_text(
+            boredom_escape_remaining_minutes(cat)
+        )
+        return InputRichMessage(
+            html=f"""
+<h1>{name}</h1>
+<p>🌀 هربت من الملل وراحت تدور قطة تلعب وياها.</p>
+<p>🐾 ما تگدر تتفاعل وياها وهي غايبة.</p>
+<p>⏳ باقي تقريباً <b>{html.escape(remaining)}</b> على رجعتها.</p>
+<tg-button-row align="center">
+<tg-button type="callback_data" style="secondary" data="{action_data('status')}">تحديث</tg-button>
+</tg-button-row>
+<footer>🐈 السلالة: {breed} | #{number}</footer>
+""".strip(),
+            is_rtl=True,
+        )
 
     if active_hiding(cat):
         name = html.escape(str(cat.get("name", "قطتك")))
