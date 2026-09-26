@@ -248,12 +248,7 @@ async def _wake_sweep(bot: Bot) -> None:
                   await _send_fled_notice(bot, cat)
                   await update_cat(cat)
                   continue
-               finish_boredom_host_busy_if_ready(cat)
-            if active_boredom_host_busy(cat):
-               await update_cat(cat)
-               continue
-
-            woke = finish_sleep(cat)
+               woke = finish_sleep(cat)
                if woke:
                   cat["last_notified_state"] = None
                   cat["last_notified_at"] = None
@@ -282,6 +277,11 @@ async def _sweep(bot: Bot) -> None:
                cat["last_notified_at"] = None
                await _send_boredom_return_notice(bot, cat)
             elif active_boredom_escape(cat):
+               await update_cat(cat)
+               continue
+
+            finish_boredom_host_busy_if_ready(cat)
+            if active_boredom_host_busy(cat):
                await update_cat(cat)
                continue
 
