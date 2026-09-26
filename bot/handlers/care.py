@@ -7,9 +7,12 @@ from datetime import datetime
 from bot.config import settings
 from bot.services.cat_events import (
   active_boredom_escape,
+  active_boredom_host_busy,
   active_hiding,
   boredom_escape_remaining_minutes,
+  boredom_host_busy_remaining_minutes,
   finish_boredom_escape_if_ready,
+  finish_boredom_host_busy_if_ready,
   fulfill_cat_request,
 )
 from bot.services.economy import check_cooldown
@@ -101,6 +104,7 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   apply_decay(cat)
   finish_sleep(cat, owner_present=True)
   finish_boredom_escape_if_ready(cat)
+  finish_boredom_host_busy_if_ready(cat)
   if mark_fled_if_needed(cat):
     await update_cat(cat)
     await message.answer("💨 القطة هربت بسبب الإهمال.")
@@ -113,6 +117,18 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     await message.answer(
       f"🌀 قطتك هربت من الملل وراحت تلعب ويا قطة ثانية. "
       f"بعدها ما رجعت؛ باقي تقريباً {remaining}."
+    )
+    return
+
+  if active_boredom_host_busy(cat):
+    await update_cat(cat)
+    remaining = sleep_duration_text(
+      boredom_host_busy_remaining_minutes(cat)
+    )
+    peer_name = str(cat.get("boredom_host_peer_cat_name", "قطة ثانية"))
+    await message.answer(
+      f"🎾 قطتك مشغولة تلعب ويا قطة {peer_name}. "
+      f"باقي تقريباً {remaining}."
     )
     return
 
