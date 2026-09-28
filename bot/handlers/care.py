@@ -16,6 +16,7 @@ from bot.services.cat_events import (
   fulfill_cat_request,
 )
 from bot.services.economy import check_cooldown
+from bot.services.rich_card import build_rich_card
 from bot.services.local_store import (
   action_block_reason,
   apply_care_effects,
@@ -46,6 +47,37 @@ from bot.services.local_store import (
 )
 
 router = Router(name="care")
+
+
+async def _send_private_care_card(
+  message: Message,
+  user_id: int,
+  cat: dict,
+  media_kind: str,
+  notice: str,
+  *,
+  points: int | None = None,
+) -> bool:
+  """Render care command results as the cat Rich Card in private chats only."""
+  if message.chat.type != "private":
+    return False
+
+  display_cat = dict(cat)
+  display_cat["action_notice"] = notice
+  if points is None:
+    points = await get_user_points(user_id)
+
+  await message.bot.send_rich_message(
+    chat_id=message.chat.id,
+    rich_message=await build_rich_card(
+      message.bot,
+      display_cat,
+      points,
+      media_kind,
+      upload_chat_id=message.chat.id,
+    ),
+  )
+  return True
 
 
 @router.message(Command("feed", "اطعام", "إطعام"))
@@ -135,10 +167,15 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
   if is_sleeping(cat):
     await update_cat(cat)
     remaining = sleep_duration_text(sleep_remaining_minutes(cat))
-    await message.answer(
+    notice = (
       f"😴 القطة نائمة هسه، باقي تقريباً {remaining}. "
       "إذا تريد تتفاعل وياها، صحّيها أولاً."
     )
+    if await _send_private_care_card(
+      message, user_id, cat, "sleep", notice
+    ):
+      return
+    await message.answer(notice)
     return
 
   if active_hiding(cat):
@@ -150,22 +187,39 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
 
   if action == "treat" and fullness_percent(cat) < TREAT_FULLNESS_THRESHOLD:
     await update_cat(cat)
-    await message.answer("🍬 التحلية تظهر من يصير الشبع 75% وفوك.")
+    notice = "🍬 التحلية تظهر من يصير الشبع 75% وفوك."
+    if await _send_private_care_card(
+      message, user_id, cat, "status", notice
+    ):
+      return
+    await message.answer(notice)
     return
 
   block_reason = action_block_reason(cat, action)
   if block_reason:
     await update_cat(cat)
     if block_reason == "starving":
-      await message.answer("🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة.")
+      notice = "🚨🍖 جوعها شديد؛ أطعمها أولاً قبل اللعب أو اللعبة أو النزهة."
+      media_kind = "hungry"
     else:
-      await message.answer("🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة.")
+      notice = "🪫 القطة منهكة وتحتاج ترتاح قبل اللعب أو اللعبة أو النزهة."
+      media_kind = "status"
+    if await _send_private_care_card(
+      message, user_id, cat, media_kind, notice
+    ):
+      return
+    await message.answer(notice)
     return
 
   refusal_reason = stubborn_care_refusal_reason(cat, action)
   if refusal_reason:
     await update_cat(cat)
-    await message.answer(stubborn_refusal_text(action, refusal_reason))
+    notice = stubborn_refusal_text(action, refusal_reason)
+    if await _send_private_care_card(
+      message, user_id, cat, "angry", notice
+    ):
+      return
+    await message.answer(notice)
     return
 
   if action in {"treat", "play", "toy", "walk", "talk", "relax"}:
@@ -268,8 +322,24 @@ async def _care_locked(message: Message, action: str, user_id: int) -> None:
     daily_note = f"\n🔥 أول زيارة اليوم! +{bonus_points} نقطة (متتالية {streak} {day_word})"
   else:
     daily_note = ""
+  notice = f"{text}!"
+  if reward_note:
+    notice += f" {reward_note.strip()}"
+  if daily_note:
+    notice += f" {daily_note.strip()}"
+
+  if await _send_private_care_card(
+    message,
+    user_id,
+    cat,
+    action,
+    notice,
+    points=balance,
+  ):
+    return
+
   await message.answer(
-    f"{text}!{reward_note}{daily_note}\n"
+    f"{notice}\n"
     f"الشبع: {fullness_percent(cat)}/100 | السعادة: {cat['happiness']}/100 | "
     f"الملل: {cat.get('boredom', 10)}/100 | الراحة: {sleep_need_percent(cat)}/100\n"
     f"نقاطك: {balance}"
