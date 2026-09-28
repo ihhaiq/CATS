@@ -51,8 +51,12 @@ Official cat artwork remains checked into the repository at:
 bot/assets/cats/<breed>/<age_stage>/<state>.png
 ```
 
-These PNG files are application assets, not runtime state. Their reusable
-Telegram `file_id` cache and admin overrides are persisted in PostgreSQL.
+These PNG files are application assets, not runtime state. In normal private-chat
+status cards, Railway serves them from `/cat-assets/` and Telegram renders a compact
+link preview instead of embedding the full photo inside the Rich Message. The public
+origin is discovered from `RAILWAY_PUBLIC_DOMAIN`; `ASSET_BASE_URL` can override it.
+If no public origin is available, the existing Telegram `file_id` media path remains
+the fallback. Admin overrides and compatibility media cache data stay in PostgreSQL.
 
 Supported breeds:
 
